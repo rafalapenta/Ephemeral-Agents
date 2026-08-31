@@ -1,0 +1,454 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-08-21",
+  "description": "Catálogo efêmero de skills on-demand para o roster executivo AGency",
+  "ephemeral_tools": [
+    {
+      "tool_id": "doc-to-action-items",
+      "name": "document-to-action-items",
+      "description": "Extrai obrigações, deadlines e tasks citadas em documentos",
+      "trigger_keywords": ["documento", "obrigação", "deadline", "task", "extract", "action items"],
+      "target_director": "atlas",
+      "budget_tokens": 400
+    },
+    {
+      "tool_id": "to-questionnaire",
+      "name": "to-questionnaire",
+      "description": "Transforma decisão em questionário estruturado para coleta de preferências",
+      "trigger_keywords": ["questionário", "preferência", "decisão", "questionnaire"],
+      "target_director": "atlas",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "session-librarian",
+      "name": "session-librarian",
+      "description": "Organiza, renomeia e arquiva sessões por prompt",
+      "trigger_keywords": ["sessão", "arquivar", "organizar", "session", "archive"],
+      "target_director": "atlas",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "weekly-review-planning",
+      "name": "weekly-review-planning",
+      "description": "Reset semanal: commitments, trabalho parado, plano da próxima semana",
+      "trigger_keywords": ["semana", "reset", "weekly", "planejar"],
+      "target_director": "atlas",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "i-have-adhd",
+      "name": "i-have-adhd",
+      "description": "Format output para leitor com ADHD: lead with next action, scannable",
+      "trigger_keywords": ["adhd", "resumo", "ação", "next step", "scannable"],
+      "target_director": "atlas",
+      "budget_tokens": 200
+    },
+    {
+      "tool_id": "cost-aware-model-routing",
+      "name": "cost-aware-model-routing",
+      "description": "Avalia tiers de modelo cheap-to-strong para routing custo-efetiva",
+      "trigger_keywords": ["custo", "model", "routing", "cheap", "expensive"],
+      "target_director": "atlas",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "backend-architecture",
+      "name": "backend-architecture",
+      "description": "Design de arquitetura backend para nova feature com API contract",
+      "trigger_keywords": ["backend", "arquitetura", "API", "design"],
+      "target_director": "vulcan",
+      "budget_tokens": 500
+    },
+    {
+      "tool_id": "request-refactor-plan",
+      "name": "request-refactor-plan",
+      "description": "Plano detalhado de refatoração com commits tiny e seguros",
+      "trigger_keywords": ["refatorar", "refactor", "tech debt", "cleanup"],
+      "target_director": "vulcan",
+      "budget_tokens": 450
+    },
+    {
+      "tool_id": "resolving-merge-conflicts",
+      "name": "resolving-merge-conflicts",
+      "description": "Resolve merge conflict em progresso com resolução neutra",
+      "trigger_keywords": ["merge conflict", "resolver", "conflito"],
+      "target_director": "vulcan",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "setup-pre-commit",
+      "name": "setup-pre-commit",
+      "description": "Setup Husky pre-commit hooks com lint-staged e Prettier",
+      "trigger_keywords": ["pre-commit", "husky", "hook", "lint"],
+      "target_director": "vulcan",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "setup-ts-deep-modules",
+      "name": "setup-ts-deep-modules",
+      "description": "Wire dependency-cruiser em repo TypeScript para análise de camadas",
+      "trigger_keywords": ["typescript", "dependência", "deep modules", "cruiser"],
+      "target_director": "vulcan",
+      "budget_tokens": 400
+    },
+    {
+      "tool_id": "migrate-to-shoehorn",
+      "name": "migrate-to-shoehorn",
+      "description": "Migra testes de type assertions as para @total-typescript",
+      "trigger_keywords": ["migrate", "shoehorn", "type assertion", "test"],
+      "target_director": "vulcan",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "working-with-legacy-code",
+      "name": "working-with-legacy-code",
+      "description": "Intervenção segura em codebase sem testes usando Feathers approach",
+      "trigger_keywords": ["legacy", "sem teste", "refatorar seguro"],
+      "target_director": "vulcan",
+      "budget_tokens": 400
+    },
+    {
+      "tool_id": "git-guardrails-claude-code",
+      "name": "git-guardrails-claude-code",
+      "description": "Setup hooks para bloquear comandos git perigosos via Claude Code",
+      "trigger_keywords": ["git", "guard", "proteção", "hook"],
+      "target_director": "vulcan",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "node-inspect-debugger",
+      "name": "node-inspect-debugger",
+      "description": "Debug Node.js via --inspect + Chrome DevTools Protocol CLI",
+      "trigger_keywords": ["debug", "node", "inspect", "devtools"],
+      "target_director": "vulcan",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "n8n-workflow-automation",
+      "name": "n8n-workflow-automation",
+      "description": "Configura workflows n8n com credentials e debug de MCP",
+      "trigger_keywords": ["n8n", "workflow", "automação", "automation"],
+      "target_director": "vulcan",
+      "budget_tokens": 400
+    },
+    {
+      "tool_id": "python-integration-boundary-testing",
+      "name": "python-integration-boundary-testing",
+      "description": "Testa Python através de boundaries DB, vector, MCP",
+      "trigger_keywords": ["python", "boundary", "integration", "test"],
+      "target_director": "vulcan",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "excalidraw",
+      "name": "excalidraw",
+      "description": "Diagramas hand-drawn em JSON Excalidraw (arq, fluxo, seq)",
+      "trigger_keywords": ["diagrama", "excalidraw", "sketch", "fluxo"],
+      "target_director": "aura",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "gpt-taste",
+      "name": "gpt-taste",
+      "description": "Validação de taste visual via GPT para decisões de design",
+      "trigger_keywords": ["taste", "validar", "design", "visual"],
+      "target_director": "aura",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "minimalist-ui",
+      "name": "minimalist-ui",
+      "description": "Interface minimalista com foco em conteúdo e whitespace",
+      "trigger_keywords": ["minimalista", "clean", "whitespace", "simple"],
+      "target_director": "aura",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "industrial-brutalist-ui",
+      "name": "industrial-brutalist-ui",
+      "description": "Estética brutalista industrial para interfaces intencionais",
+      "trigger_keywords": ["brutalist", "industrial", "raw", "brutalismo"],
+      "target_director": "aura",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "stitch-design-taste",
+      "name": "stitch-design-taste",
+      "description": "Unifica múltiplas referências de design em taste coeso",
+      "trigger_keywords": ["stitch", "unificar", "referência", "taste"],
+      "target_director": "aura",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "redesign-existing-projects",
+      "name": "redesign-existing-projects",
+      "description": "Upgrade de UI/UX em projeto existente para qualidade premium",
+      "trigger_keywords": ["redesign", "upgrade", "premium", "existente"],
+      "target_director": "aura",
+      "budget_tokens": 400
+    },
+    {
+      "tool_id": "prototype",
+      "name": "prototype",
+      "description": "Throwaway prototype para responder questão de design rapidamente",
+      "trigger_keywords": ["prototype", "throwaway", "validar", "rápido"],
+      "target_director": "aura",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "architecture-diagram",
+      "name": "architecture-diagram",
+      "description": "Diagrama SVG dark-themed de arquitetura/cloud/infra",
+      "trigger_keywords": ["arquitetura", "diagrama", "infra", "cloud"],
+      "target_director": "aura",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "baoyu-article-illustrator",
+      "name": "baoyu-article-illustrator",
+      "description": "Ilustração para artigo/informativo em estilo baoyu",
+      "trigger_keywords": ["ilustrar", "artigo", "infográfico"],
+      "target_director": "aura",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "sketch",
+      "name": "sketch",
+      "description": "Mockup rápido HTML 2-3 variantes para comparação de design",
+      "trigger_keywords": ["mockup", "sketch", "variante", "comparar"],
+      "target_director": "aura",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "design-md",
+      "name": "design-md",
+      "description": "Autora/valida/exporta token spec Google DESIGN.md",
+      "trigger_keywords": ["design token", "DESIGN.md", "spec"],
+      "target_director": "aura",
+      "budget_tokens": 200
+    },
+    {
+      "tool_id": "blocked-page-recovery",
+      "name": "blocked-page-recovery",
+      "description": "Recupera páginas bloqueadas/paywalled/WAF via fallbacks",
+      "trigger_keywords": ["bloqueado", "paywall", "WAF", "recuperar"],
+      "target_director": "vesper",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "himalaya",
+      "name": "himalaya",
+      "description": "Email via CLI IMAP/SMTP do terminal",
+      "trigger_keywords": ["email", "himalaya", "imap", "smtp"],
+      "target_director": "vesper",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "email-inbox-triage",
+      "name": "email-inbox-triage",
+      "description": "Triagem de inbox: prioriza threads, rascunha respostas",
+      "trigger_keywords": ["inbox", "triage", "email", "priorizar"],
+      "target_director": "vesper",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "writing-shape",
+      "name": "writing-shape",
+      "description": "Transforma material bruto em journey articulada ou artigo",
+      "trigger_keywords": ["escrever", "artigo", "transformar", "shape"],
+      "target_director": "vesper",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "visual-content",
+      "name": "visual-content",
+      "description": "Planejamento, criação ou repurposing de conteúdo visual",
+      "trigger_keywords": ["visual", "conteúdo", "criar", "repurpose"],
+      "target_director": "vesper",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "youtube-content",
+      "name": "youtube-content",
+      "description": "Transcrição YouTube para resumos, threads, blogs",
+      "trigger_keywords": ["youtube", "transcrição", "vídeo"],
+      "target_director": "vesper",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "youtube-playlist-analysis",
+      "name": "youtube-playlist-analysis",
+      "description": "Análise e categorização de playlists YouTube",
+      "trigger_keywords": ["playlist", "youtube", "categorizar"],
+      "target_director": "vesper",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "humanizer",
+      "name": "humanizer",
+      "description": "Humaniza texto: remove AI-isms, adiciona voz real",
+      "trigger_keywords": ["humanizar", "voz", "humano", "AI-ism"],
+      "target_director": "vesper",
+      "budget_tokens": 200
+    },
+    {
+      "tool_id": "data-visualization",
+      "name": "data-visualization",
+      "description": "Visualização de dados para apresentações e dashboards",
+      "trigger_keywords": ["visualizar", "dados", "gráfico", "chart"],
+      "target_director": "sterling",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "airtable",
+      "name": "airtable",
+      "description": "Airtable REST API: CRUD de records, filtros, upserts",
+      "trigger_keywords": ["airtable", "base", "records"],
+      "target_director": "sterling",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "docx",
+      "name": "docx",
+      "description": "Criar, ler, editar, template e revisar arquivos Word .docx",
+      "trigger_keywords": ["word", "docx", "documento"],
+      "target_director": "sterling",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "pdf",
+      "name": "pdf",
+      "description": "Criar, ler, merger, preencher e secured PDFs",
+      "trigger_keywords": ["pdf", "documento"],
+      "target_director": "sterling",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "powerpoint",
+      "name": "powerpoint",
+      "description": "Criar, ler, editar decks .pptx com python-pptx",
+      "trigger_keywords": ["powerpoint", "ppts", "apresentação"],
+      "target_director": "sterling",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "notion",
+      "name": "notion",
+      "description": "Notion API + ntn CLI: pages, databases, markdown, Workers",
+      "trigger_keywords": ["notion", "workspace"],
+      "target_director": "sterling",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "box",
+      "name": "box",
+      "description": "Box: cloud files, sharing, search e metadata",
+      "trigger_keywords": ["box", "cloud", "arquivo"],
+      "target_director": "sterling",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "google-workspace",
+      "name": "google-workspace",
+      "description": "Gmail, Calendar, Drive, Docs, Sheets via gws CLI",
+      "trigger_keywords": ["google", "workspace", "gmail", "drive"],
+      "target_director": "sterling",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "teams-meeting-pipeline",
+      "name": "teams-meeting-pipeline",
+      "description": "Pipeline de reuniões Teams com agendamentos e follow-ups",
+      "trigger_keywords": ["teams", "reunião", "meeting"],
+      "target_director": "sterling",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "domain-modeling",
+      "name": "domain-modeling",
+      "description": "Constrói e afia domain model do projeto via DDD",
+      "trigger_keywords": ["domain", "modelo", "DDD", "domínio"],
+      "target_director": "sterling",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "ubiquitous-language",
+      "name": "ubiquitous-language",
+      "description": "Extrai glossário de linguagem ubíqua DDD do codebase",
+      "trigger_keywords": ["linguagem", "glossário", "ubiquitous", "DDD"],
+      "target_director": "sterling",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "ocr-and-documents",
+      "name": "ocr-and-documents",
+      "description": "Extrai texto de PDFs/scans via pymupdf e marker-pdf",
+      "trigger_keywords": ["OCR", "scan", "PDF", "texto"],
+      "target_director": "lyra",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "indigokarasu-finch",
+      "name": "indigokarasu-finch",
+      "description": "Análise de observação de birds e dados ornitológicos",
+      "trigger_keywords": ["bird", " Finch", "observação", "ornitologia"],
+      "target_director": "lyra",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "huggingface-hub",
+      "name": "huggingface-hub",
+      "description": "HF CLI: search/download/upload models e datasets",
+      "trigger_keywords": ["huggingface", "model", "dataset", "hub"],
+      "target_director": "lyra",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "llama-cpp",
+      "name": "llama-cpp",
+      "description": "Inferência local GGUF via llama.cpp + HF Hub discovery",
+      "trigger_keywords": ["llama", "GGUF", "local", "inferência"],
+      "target_director": "lyra",
+      "budget_tokens": 350
+    },
+    {
+      "tool_id": "segment-anything-model",
+      "name": "segment-anything-model",
+      "description": "SAM: segmentação zero-shot de imagens via points/boxes/masks",
+      "trigger_keywords": ["SAM", "segment", "imagem", "mask"],
+      "target_director": "lyra",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "weights-and-biases",
+      "name": "weights-and-biases",
+      "description": "W&B: log experimentos ML, sweeps, model registry, dashboards",
+      "trigger_keywords": ["wandb", "experimento", "ML", "sweep"],
+      "target_director": "lyra",
+      "budget_tokens": 300
+    },
+    {
+      "tool_id": "nano-pdf",
+      "name": "nano-pdf",
+      "description": "Edição text-based em PDFs via prompts de linguagem natural",
+      "trigger_keywords": ["nano", "PDF", "editar", "texto"],
+      "target_director": "lyra",
+      "budget_tokens": 250
+    },
+    {
+      "tool_id": "baoyu-comic",
+      "name": "baoyu-comic",
+      "description": "Visualização de dados em formato quadrinho/baoyu",
+      "trigger_keywords": ["quadrinho", "comic", "baoyu", "visual"],
+      "target_director": "lyra",
+      "budget_tokens": 300
+    }
+  ],
+  "meta": {
+    "total_tools": 52,
+    "directors_covered": 6,
+    "max_budget_per_tool": 500,
+    "avg_budget_per_tool": 300,
+    "routing": "route_agent com gatilho de skill name"
+  }
+}

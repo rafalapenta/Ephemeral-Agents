@@ -1,0 +1,236 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-08-21",
+  "description": "Manifesto de skills ativas por diretor executivo — contexto base",
+  "directors": {
+    "atlas": {
+      "role": "CEO & Orquestrador Geral",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "agent-handoff-protocols",
+          "reason": "Protocolo central de transferência entre agentes"
+        },
+        {
+          "name": "context-budget-optimizer",
+          "reason": "Blindagem contra context bloat (payload ≤ 2.000 tokens)"
+        },
+        {
+          "name": "wayfinder",
+          "reason": "Planejamento de trajetória para tarefas complexas"
+        },
+        {
+          "name": "to-spec",
+          "reason": "Transforma conversas em specs estruturadas para produção"
+        },
+        {
+          "name": "brainstorm",
+          "reason": "Ideação socrática e refinação de design"
+        },
+        {
+          "name": "grill-me",
+          "reason": "Grill relentless de planos e decisões para qualidade"
+        },
+        {
+          "name": "obsidian-vault",
+          "reason": "Gestão do wiki de memória persistente cross-session"
+        },
+        {
+          "name": "cost-aware-multiagent-orchestration",
+          "reason": "Orquestração custo-efetiva entre múltiplos agentes"
+        }
+      ],
+      "total_estimated_tokens": 1650
+    },
+    "vulcan": {
+      "role": "CTO / Tech & Infrastructure",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "clean-architecture",
+          "reason": "Estruturação por camadas e dependency rule"
+        },
+        {
+          "name": "clean-code",
+          "reason": "Nomes claros, funções puras, low coupling"
+        },
+        {
+          "name": "tdd",
+          "reason": "Test-driven development atômico (Red-Green-Refactor)"
+        },
+        {
+          "name": "diagnosing-bugs",
+          "reason": "Diagnóstico sistemático de bugs e regressões"
+        },
+        {
+          "name": "github-pr-workflow",
+          "reason": "Ciclo de vida de PRs com review estruturado"
+        },
+        {
+          "name": "codebase-inspection",
+          "reason": "Inspeção com pygount: LOC, linguagens, ratios"
+        },
+        {
+          "name": "secure-api-integrations",
+          "reason": "Integrações com manejo seguro de secrets"
+        },
+        {
+          "name": "incremental-builder",
+          "reason": "Build incremental com TDD (substituto de implement)"
+        }
+      ],
+      "total_estimated_tokens": 1750
+    },
+    "aura": {
+      "role": "CPO / Product & Spatial",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "design-taste-frontend",
+          "reason": "Curadoria de taste visual para frontend premium"
+        },
+        {
+          "name": "ux-heuristics",
+          "reason": "Aplicação das 10 heurísticas de Nielsen"
+        },
+        {
+          "name": "adversarial-ux-test",
+          "reason": "Testes adversariais para prevenir falhas UX"
+        },
+        {
+          "name": "shadcn",
+          "reason": "Componentes Shadcn/UI como base de consistência"
+        },
+        {
+          "name": "high-end-visual-design",
+          "reason": "Design visual de alta qualidade premium"
+        },
+        {
+          "name": "claude-design",
+          "reason": "Diretrizes de design inspiradas em Claude"
+        },
+        {
+          "name": "image-to-code",
+          "reason": "Conversão de mockups em código produtivo"
+        },
+        {
+          "name": "pm-product-strategy",
+          "reason": "PRDs e user stories formais para estruturação"
+        }
+      ],
+      "total_estimated_tokens": 1600
+    },
+    "vesper": {
+      "role": "CMO/CRO / Growth & Sales",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "competitor-news-monitor",
+          "reason": "Monitoramento contínuo de notícias competidoras"
+        },
+        {
+          "name": "marketplace-official-research",
+          "reason": "Pesquisa em marketplaces para oportunidades"
+        },
+        {
+          "name": "scrapling-official",
+          "reason": "Scraping anti-bot para coleta de intelligence"
+        },
+        {
+          "name": "social-commerce-content-strategy",
+          "reason": "Estratégia de conteúdo para social commerce"
+        },
+        {
+          "name": "product-price-monitor",
+          "reason": "Monitoramento de preços da concorrência"
+        },
+        {
+          "name": "grounded-citations",
+          "reason": "Citações fundamentadas em fontes verificáveis"
+        },
+        {
+          "name": "agentmail",
+          "reason": "Inbox dedicada para comunicação autônoma"
+        }
+      ],
+      "total_estimated_tokens": 1400
+    },
+    "sterling": {
+      "role": "COO/CFO / Business & Finance",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "xlsx-modeler",
+          "reason": "Modelagem contábil e FP&A profissional (substituto de xlsx)"
+        },
+        {
+          "name": "private-company-investment-due-diligence",
+          "reason": "Due diligence rigorosa para investimentos"
+        },
+        {
+          "name": "to-tickets",
+          "reason": "Decomposição de specs em tickets executáveis"
+        },
+        {
+          "name": "client-facing-mvp-planning",
+          "reason": "Pacotes MVP apresentáveis a cliente desde dia 1"
+        },
+        {
+          "name": "weekly-review-planning",
+          "reason": "Reset semanal de commitments e visão operacional"
+        },
+        {
+          "name": "meeting-action-items",
+          "reason": "Extração de obrigações e deadlines de reuniões"
+        },
+        {
+          "name": "n8n-workflow-mgmt",
+          "reason": "Gerenciamento de workflows n8n para automação"
+        }
+      ],
+      "total_estimated_tokens": 1450
+    },
+    "lyra": {
+      "role": "Head of Research & Spatial Data",
+      "context_budget_max": 2000,
+      "active_skills": [
+        {
+          "name": "research",
+          "reason": "Investigação contra fontes primárias de alta confiança"
+        },
+        {
+          "name": "schema-bound-corpus-extraction",
+          "reason": "Extração estruturada em JSON schema-valid"
+        },
+        {
+          "name": "jupyter-live-kernel",
+          "reason": "Exploração interativa Python para análise"
+        },
+        {
+          "name": "maps",
+          "reason": "Dados geoespaciais e dimensão spatial"
+        },
+        {
+          "name": "graphify-wiki-curation",
+          "reason": "Refinamento de wiki com Graphify"
+        },
+        {
+          "name": "notebooklm-knowledge-pipeline",
+          "reason": "Síntese via NotebookLM/Gemini para intelligence"
+        },
+        {
+          "name": "grounded-citations",
+          "reason": "Citações fundamentadas para credibilidade"
+        }
+      ],
+      "total_estimated_tokens": 1350
+    }
+  },
+  "meta": {
+    "total_directors": 6,
+    "total_active_skills": 45,
+    "avg_skills_per_director": 7.5,
+    "max_budget_per_director": 2000,
+    "protocol": "Registry-as-a-Tool / Zero Context Bloat"
+  }
+}
