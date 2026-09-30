@@ -19,10 +19,12 @@ from sqlalchemy.orm import Session, sessionmaker, selectinload
 from src.catalog.indexer import HashEmbeddingFunction
 from src.database.models import Agent, AgentTool
 
-PROJECT_ROOT = Path(r"C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency")
-DEFAULT_DB_URL = f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}"
-DEFAULT_CHROMA_PATH = PROJECT_ROOT / "chroma"
-DEFAULT_CATALOG_PATH = Path(r"C:\Users\RAFAEL\Documents\R!\Obsidian Memory\raw\agency-agents")
+import os
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{_REPO_ROOT / 'agency_agents.db'}")
+DEFAULT_CHROMA_PATH = Path(os.getenv("CHROMA_PERSIST_DIR", str(_REPO_ROOT / "chroma")))
+DEFAULT_CATALOG_PATH = Path(os.getenv("CATALOG_PATH", str(_REPO_ROOT / "src" / "bots_config")))
 
 
 # Fixed domain priority for deterministic tie-breaking (lower = higher priority)

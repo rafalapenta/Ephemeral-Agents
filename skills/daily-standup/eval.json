@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "completeness", "weight": 0.3 },
-    { "name": "actionable_priorities", "weight": 0.4 },
-    { "name": "blockers_identified", "weight": 0.3 }
-  ]
-}

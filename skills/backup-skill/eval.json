@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "completeness", "weight": 0.4 },
-    { "name": "size_efficiency", "weight": 0.3 },
-    { "name": "audit_logging", "weight": 0.3 }
-  ]
-}

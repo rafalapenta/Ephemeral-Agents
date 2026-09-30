@@ -1,7 +1,0 @@
-{
-  "name": "agy-extension",
-  "version": "1.0.0",
-  "description": "agy (Antigravity) CLI extension for Agentic OS",
-  "model": "agy",
-  "capabilities": ["web_search", "multi_modal", "data_analysis", "document_understanding", "reasoning"]
-}

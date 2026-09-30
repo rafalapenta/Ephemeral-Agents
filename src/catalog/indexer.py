@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from src.database.models import Agent, AgentTool, Base
 from src.database.schemas import AgentCreate
 
-PROJECT_ROOT = Path(r"C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_URL = f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}"
 DEFAULT_CHROMA_PATH = PROJECT_ROOT / "chroma"
 _COLLECTION_NAME = "agency_agents"
@@ -136,7 +136,7 @@ def parse_agent_markdown(path: Path, source_root: Path) -> AgentCreate:
     macro_domain = relative.parts[0]
     squad = relative.parts[-2] if len(relative.parts) > 2 else None
 
-    agent_id = path.stem
+    agent_id = path.parent.name if path.stem.lower() == "soul" else path.stem
     name = _non_empty_string(metadata.get("name")) or agent_id.replace("-", " ").title()
     hooks = _trigger_hooks(metadata, body)
     if not hooks:

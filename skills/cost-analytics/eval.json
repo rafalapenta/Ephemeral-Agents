@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "accuracy", "weight": 0.4 },
-    { "name": "alert_timeliness", "weight": 0.3 },
-    { "name": "recommendation_quality", "weight": 0.3 }
-  ]
-}

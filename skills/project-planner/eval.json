@@ -1,8 +1,0 @@
-{
-  "criteria": [
-    { "name": "task_granularity", "weight": 0.3 },
-    { "name": "spec_quality", "weight": 0.3 },
-    { "name": "verification_steps", "weight": 0.2 },
-    { "name": "feasibility", "weight": 0.2 }
-  ]
-}

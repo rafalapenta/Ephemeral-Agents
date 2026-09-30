@@ -1,8 +1,0 @@
-{
-  "criteria": [
-    { "name": "source_diversity", "weight": 0.25 },
-    { "name": "accuracy", "weight": 0.3 },
-    { "name": "synthesis_quality", "weight": 0.25 },
-    { "name": "actionability", "weight": 0.2 }
-  ]
-}

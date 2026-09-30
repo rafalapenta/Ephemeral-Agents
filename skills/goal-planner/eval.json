@@ -1,8 +1,0 @@
-{
-  "criteria": [
-    { "name": "goal_clarity", "weight": 0.3 },
-    { "name": "task_granularity", "weight": 0.3 },
-    { "name": "dependency_tracking", "weight": 0.2 },
-    { "name": "feasibility", "weight": 0.2 }
-  ]
-}

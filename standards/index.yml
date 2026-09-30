@@ -1,9 +1,0 @@
-api:
-  response-format:
-    description: API response envelope structure, status codes
-  error-handling:
-    description: Error code conventions, exception handling
-
-root:
-  naming-conventions:
-    description: File, class, and variable naming conventions
