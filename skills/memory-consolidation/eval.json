@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "file_size_reduction", "weight": 0.3 },
-    { "name": "information_preservation", "weight": 0.4 },
-    { "name": "contradiction_detection", "weight": 0.3 }
-  ]
-}

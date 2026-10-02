@@ -7,16 +7,19 @@ Models task lifecycle as a deterministic state machine:
                            blocked
 
 Every transition is validated and recorded in the audit trail.
+Now integrated with Linear GraphQL API for cloud state synchronization.
 """
 from __future__ import annotations
 
 import time
 import uuid
+import logging
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+logger = logging.getLogger(__name__)
 
 class KanbanStatus(str, Enum):
     """Valid Kanban column states."""
@@ -94,13 +97,34 @@ class KanbanBoard:
 
     def __init__(self) -> None:
         self._tasks: dict[str, KanbanTask] = {}
+        self._linear = None
+
+    @property
+    def linear(self):
+        if self._linear is None:
+            from src.orchestration.linear_client import get_linear_client
+            self._linear = get_linear_client()
+        return self._linear
 
     @property
     def tasks(self) -> dict[str, KanbanTask]:
         return dict(self._tasks)
 
     def columns(self) -> dict[str, list[KanbanTask]]:
-        """Return tasks grouped by status column."""
+        """Return tasks grouped by status column. Pulls from Linear if configured."""
+        if self.linear:
+            try:
+                ready_tasks = self.linear.fetch_ready_tasks()
+                # Store them locally so we can retrieve them by ID later during transition
+                for task in ready_tasks:
+                    self._tasks[task.task_id] = task
+                
+                # If using Linear, we primarily care about the READY column for the scheduler
+                return {KanbanStatus.READY.value: ready_tasks}
+            except Exception as e:
+                logger.error(f"Failed to fetch tasks from Linear: {e}")
+
+        # Fallback local logic
         cols: dict[str, list[KanbanTask]] = {s.value: [] for s in KanbanStatus}
         for task in self._tasks.values():
             cols[task.status.value].append(task)
@@ -151,6 +175,21 @@ class KanbanBoard:
             task.block_reason = reason
         elif from_status == KanbanStatus.BLOCKED:
             task.block_reason = ""
+
+        # Update Linear if configured
+        if self.linear:
+            state_map = {
+                KanbanStatus.TODO: "Todo",
+                KanbanStatus.READY: "Todo",
+                KanbanStatus.IN_PROGRESS: "In Progress",
+                KanbanStatus.REVIEW: "In Review",
+                KanbanStatus.DONE: "Done",
+                KanbanStatus.BLOCKED: "Canceled"
+            }
+            target = state_map.get(to_status, "Todo")
+            success = self.linear.update_issue_state(task_id, target)
+            if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
+                self.linear.add_comment(task_id, "Agent execution completed successfully.")
 
         return task
 

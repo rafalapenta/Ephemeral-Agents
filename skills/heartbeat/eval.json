@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "all_agents_online", "weight": 0.3 },
-    { "name": "alerts_caught", "weight": 0.4 },
-    { "name": "response_time_under_5s", "weight": 0.3 }
-  ]
-}

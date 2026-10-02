@@ -1,6 +1,0 @@
-profiles:
-  default:
-    description: Default profile for general projects
-    standards:
-      - api-response-format
-      - naming-conventions

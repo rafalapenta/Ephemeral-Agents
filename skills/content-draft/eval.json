@@ -1,8 +1,0 @@
-{
-  "criteria": [
-    { "name": "brand_tone_match", "weight": 0.3 },
-    { "name": "factual_accuracy", "weight": 0.3 },
-    { "name": "structure_clarity", "weight": 0.2 },
-    { "name": "engagement", "weight": 0.2 }
-  ]
-}

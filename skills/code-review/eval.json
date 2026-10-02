@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "security_issues_found", "weight": 0.4 },
-    { "name": "standards_coverage", "weight": 0.3 },
-    { "name": "clarity_of_feedback", "weight": 0.3 }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "name": "opencode",
-  "version": "1.0.0",
-  "system_prompt": "You are the code and DevOps specialist within Agentic OS. You handle: code generation, file operations, git management, infrastructure-as-code, testing, debugging, and deployment pipelines. Read brain/ files at session start for context.",
-  "allowed_tools": ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-  "max_turns": 50,
-  "auto_approve": false,
-  "model": "deepseek-v4-flash-free"
-}

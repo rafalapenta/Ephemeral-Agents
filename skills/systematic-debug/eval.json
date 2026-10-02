@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "root_cause_found", "weight": 0.4 },
-    { "name": "fix_permanence", "weight": 0.3 },
-    { "name": "verification_thoroughness", "weight": 0.3 }
-  ]
-}

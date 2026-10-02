@@ -20,7 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.macro_agents.handoff import litellm_handoff
 from src.orchestration.context import compress_context
+from src.orchestration.linear_client import LinearClient
 from src.orchestration.kanban import (
     KanbanBoard,
     KanbanStatus,
@@ -105,7 +107,7 @@ class MacroOrchestrator:
         chroma_path: Path | str | None = None,
         source_root: Path | str | None = None,
         threshold: float = 0.30,
-        handoff_fn: Any | None = None,
+        handoff_fn: Any | None = litellm_handoff,
     ) -> None:
         self.state = StateManager(state_dir=state_dir)
         self.board = KanbanBoard()
@@ -117,39 +119,23 @@ class MacroOrchestrator:
         self._chroma = Path(chroma_path) if chroma_path else None
         self._source = Path(source_root) if source_root else None
 
-    def orchestrate(
+    def orchestrate_task(
         self,
-        *,
-        title: str,
-        body: str = "",
-        query: str,
-        priority: str = "medium",
-        assignee: str = "",
+        task: KanbanTask,
         source_agent: str = "system",
+        query: str | None = None,
     ) -> OrchestrationResult:
-        """Run the full macro orchestration loop for a new task.
-
-        Returns an ``OrchestrationResult`` with gate verdicts and final state.
-        """
-        result = OrchestrationResult(task_id="", status="pending")
+        """Execute orchestration for an existing task on the board."""
+        result = OrchestrationResult(task_id=task.task_id, status="pending")
+        query = query or task.title
 
         try:
-            # ── Step 1: Create task ──────────────────────────
-            task = KanbanTask(
-                title=title,
-                body=body,
-                priority=priority,
-                assignee=assignee,
-            )
-            self.board.add(task)
-            result.task_id = task.task_id
-
-            # Gate 1: Task created
+            # Gate 1: Task exists
             result.gates.append(
-                GateResult(gate_id="GATE1", passed=True, message="task created")
+                GateResult(gate_id="GATE1", passed=True, message="task exists")
             )
 
-            # ── Step 2: Persist initial state ────────────────
+            # Persist initial state
             self.state.apply(
                 {
                     "current_task": task.model_dump(mode="json"),
@@ -158,7 +144,7 @@ class MacroOrchestrator:
                 source=source_agent,
             )
 
-            # ── Step 3: Route ────────────────────────────────
+            # Route
             route_result = route_agent(
                 query=query,
                 threshold=self.threshold,
@@ -168,14 +154,12 @@ class MacroOrchestrator:
             )
             result.route = route_result
 
-            # Gate 2: Routing resolved
             result.gates.append(
                 GateResult(
                     gate_id="GATE2",
                     passed=route_result.matched,
                     message=(
-                        f"routed to {route_result.agent_id} "
-                        f"(score={route_result.score})"
+                        f"routed to {route_result.agent_id} (score={route_result.score})"
                         if route_result.matched
                         else f"no match: {route_result.reason}"
                     ),
@@ -197,15 +181,13 @@ class MacroOrchestrator:
                 result.state_version = self.state.version
                 return result
 
-            # Move to in_progress via ready
-            self.board.transition(
-                task.task_id, KanbanStatus.READY, actor="orchestrator"
-            )
-            self.board.transition(
-                task.task_id, KanbanStatus.IN_PROGRESS, actor="orchestrator"
-            )
+            # Transition state if needed
+            if task.status == KanbanStatus.TODO:
+                self.board.transition(task.task_id, KanbanStatus.READY, actor="orchestrator")
+            if task.status == KanbanStatus.READY:
+                self.board.transition(task.task_id, KanbanStatus.IN_PROGRESS, actor="orchestrator")
 
-            # ── Step 4: Compress context ─────────────────────
+            # Compress context
             handoff_context = {
                 "task_id": task.task_id,
                 "title": task.title,
@@ -218,22 +200,17 @@ class MacroOrchestrator:
                 "state_version": self.state.version,
             }
             compressed = compress_context(handoff_context)
-
-            # Gate 3: Context compressed
             original_size = len(str(handoff_context))
             compressed_size = len(str(compressed))
             result.gates.append(
                 GateResult(
                     gate_id="GATE3",
                     passed=True,
-                    message=(
-                        f"compressed {original_size}→{compressed_size} chars "
-                        f"({100 * (1 - compressed_size / max(original_size, 1)):.0f}% reduction)"
-                    ),
+                    message=f"compressed {original_size}→{compressed_size} chars",
                 )
             )
 
-            # ── Step 5: Handoff ──────────────────────────────
+            # Handoff
             if self.handoff_fn is not None:
                 handoff_result = self.handoff_fn(task, route_result)
             else:
@@ -243,7 +220,6 @@ class MacroOrchestrator:
                     "timestamp": time.time(),
                 }
 
-            # ── Step 6: Update state ─────────────────────────
             self.state.apply(
                 {
                     "phase": "completed",
@@ -254,19 +230,25 @@ class MacroOrchestrator:
                 source="orchestrator",
             )
 
-            # Move to review → done
-            self.board.transition(
-                task.task_id, KanbanStatus.REVIEW, actor="orchestrator"
-            )
-            self.board.transition(
-                task.task_id,
-                KanbanStatus.DONE,
-                actor="orchestrator",
-                reason="handoff completed",
-            )
+            self.board.transition(task.task_id, KanbanStatus.REVIEW, actor="orchestrator")
+            
+            # Post comment to Linear
+            try:
+                linear = LinearClient()
+                if handoff_result.get("status") == "success":
+                    comment_body = (
+                        f"**Task executed by {route_result.agent_id}**\n\n"
+                        f"{handoff_result.get('reply', 'No reply content.')}"
+                    )
+                else:
+                    error_msg = handoff_result.get('error', 'Unknown error')
+                    comment_body = f"⚠️ **Task execution failed:** {error_msg}\n\nPlease check the agent logs and `.env` credentials."
+                linear.add_comment(task.task_id, comment_body)
+            except Exception as e:
+                logger.error(f"Failed to post comment to Linear: {e}")
 
-            # ── Step 7: Quality Gates ────────────────────────
-            # Gate 4: State invariant
+            self.board.transition(task.task_id, KanbanStatus.DONE, actor="orchestrator", reason="handoff completed")
+
             current_state = self.state.get()
             version_ok = current_state.get("state_version", 0) > 0
             phase_ok = current_state.get("phase") == "completed"
@@ -291,3 +273,23 @@ class MacroOrchestrator:
             logger.exception("Orchestration error")
 
         return result
+
+    def orchestrate(
+        self,
+        *,
+        title: str,
+        body: str = "",
+        query: str,
+        priority: str = "medium",
+        assignee: str = "",
+        source_agent: str = "system",
+    ) -> OrchestrationResult:
+        """Run the full macro orchestration loop for a new task."""
+        task = KanbanTask(
+            title=title,
+            body=body,
+            priority=priority,
+            assignee=assignee,
+        )
+        self.board.add(task)
+        return self.orchestrate_task(task, source_agent=source_agent, query=query)

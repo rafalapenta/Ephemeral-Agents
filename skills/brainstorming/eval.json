@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "alternative_exploration", "weight": 0.3 },
-    { "name": "constraint_awareness", "weight": 0.3 },
-    { "name": "recommendation_quality", "weight": 0.4 }
-  ]
-}

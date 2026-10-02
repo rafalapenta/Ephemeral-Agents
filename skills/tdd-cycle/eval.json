@@ -1,7 +1,0 @@
-{
-  "criteria": [
-    { "name": "test_before_code", "weight": 0.4 },
-    { "name": "test_quality", "weight": 0.3 },
-    { "name": "refactoring_quality", "weight": 0.3 }
-  ]
-}

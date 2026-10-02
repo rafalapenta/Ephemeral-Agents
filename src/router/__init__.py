@@ -1,6 +1,6 @@
 """Router module — stateless agent routing via FastMCP."""
 
-from typing import Any, dict
+from typing import Any
 
 
 class AgentRouter:
