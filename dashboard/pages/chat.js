@@ -156,8 +156,18 @@ async function sendChatMessage() {
     window._chatHistory.push({ role: 'assistant', content: r.response.content, agent });
   } catch (err) {
     removeTypingIndicator(typingId);
-    const msg = err.name === 'AbortError' ? 'Request timed out after 200s' : err.message;
-    addChatMessage('assistant', `⚠ Error: ${msg}`, agent);
+    if (err.name === 'RateLimitError') {
+      // Rate limiting is server state, not conversation content — showing it
+      // as a chat message would pollute the transcript.
+      showToast(`Rate limit — tente em ${err.retryAfter}s`, 'error');
+    } else if (err.name === 'AuthError') {
+      setToken('');
+      showToast('Sessão expirada — token removido.', 'error');
+      ensureToken();
+    } else {
+      const msg = err.name === 'AbortError' ? 'Request timed out after 200s' : err.message;
+      addChatMessage('assistant', `⚠ Error: ${msg}`, agent);
+    }
   }
 }
 

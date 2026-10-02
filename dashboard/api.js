@@ -1,29 +1,94 @@
+// ─── Auth ───────────────────────────────────────────────────────────────────
+// server.py (Fase 0) requires X-Agentic-Token on every /api/* endpoint except
+// /api/status. The token is kept in sessionStorage rather than localStorage so
+// it does not persist on disk and dies when the tab closes.
+const TOKEN_KEY = 'agentic_token';
+
+function getToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || '';
+}
+
+function setToken(value) {
+  if (value) sessionStorage.setItem(TOKEN_KEY, value);
+  else sessionStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  const token = getToken();
+  if (token) headers['X-Agentic-Token'] = token;
+  return headers;
+}
+
+function RateLimitError(retryAfter) {
+  this.name = 'RateLimitError';
+  this.retryAfter = retryAfter;
+  this.message = `Rate limit exceeded. Retry in ${retryAfter}s.`;
+}
+RateLimitError.prototype = Object.create(Error.prototype);
+
+function AuthError(message) {
+  this.name = 'AuthError';
+  this.message = message;
+}
+AuthError.prototype = Object.create(Error.prototype);
+
+/**
+ * Handle a non-OK response uniformly: surface 429 as a RateLimitError carrying
+ * Retry-After so callers can show a countdown, and 401 as an AuthError so the
+ * UI can prompt for the token instead of rendering a generic failure.
+ */
+async function handleErrorResponse(r) {
+  if (r.status === 429) {
+    const retryAfter = parseInt(r.headers.get('Retry-After') || '30', 10);
+    throw new RateLimitError(retryAfter);
+  }
+  if (r.status === 401) {
+    const e = await r.json().catch(() => ({}));
+    throw new AuthError(e.detail || 'Unauthorized — API token required.');
+  }
+  const e = await r.json().catch(() => ({}));
+  throw new Error(e.detail || `Request failed: ${r.status}`);
+}
+
 const api = {
   async get(path) {
-    const r = await fetch(path);
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    const r = await fetch(path, { headers: authHeaders() });
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   async post(path, body = {}, controller) {
-    const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const opts = {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    };
     if (controller) opts.signal = controller.signal;
     const r = await fetch(path, opts);
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   async put(path, body = {}) {
-    const r = await fetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    const r = await fetch(path, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   async patch(path, body = {}) {
-    const r = await fetch(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    const r = await fetch(path, {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   async del(path) {
-    const r = await fetch(path, { method: 'DELETE' });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    const r = await fetch(path, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   getStatus: () => api.get('/api/status'),
@@ -56,10 +121,10 @@ const api = {
     form.append('agent', agent);
     form.append('message', message || '');
     form.append('file', file);
-    const opts = { method: 'POST', body: form };
+    const opts = { method: 'POST', body: form, headers: authHeaders() };
     if (controller) opts.signal = controller.signal;
     const r = await fetch('/api/chat/upload', opts);
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `Request failed: ${r.status}`); }
+    if (!r.ok) await handleErrorResponse(r);
     return r.json();
   },
   getChatHistory: () => api.get('/api/chat/history'),
@@ -126,3 +191,39 @@ const api = {
   // v0.4.0: Code Diff Viewer
   getDiff: (file, ref = 'HEAD') => api.get(`/api/diff?file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}`),
 };
+
+// ─── Token prompt ───────────────────────────────────────────────────────────
+// server.py prints AGENCY_API_TOKEN at startup when it is not configured in the
+// environment. The operator pastes it here once; it lives in sessionStorage.
+
+function ensureToken() {
+  if (getToken()) return true;
+
+  const input = window.prompt(
+    'This API requires an access token.\n\n' +
+    'It is printed by the server on startup as AGENCY_API_TOKEN.\n' +
+    'It is kept in sessionStorage and cleared when this tab closes.',
+    ''
+  );
+  if (!input) return false;
+
+  setToken(input.trim());
+  return true;
+}
+
+// Probe a token-protected endpoint: a 200 means the token is good, a 401 means
+// it is not. /api/status is deliberately NOT used here because it is public
+// and would return 200 regardless of the token's validity.
+async function verifyToken() {
+  try {
+    const r = await fetch('/api/skills', { headers: authHeaders() });
+    if (r.status === 401) {
+      setToken('');
+      showToast('Invalid token.', 'error');
+      return false;
+    }
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
