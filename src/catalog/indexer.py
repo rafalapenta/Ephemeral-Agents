@@ -61,24 +61,31 @@ class IndexingReport:
     errors: list[str] = field(default_factory=list)
 
 
-class HashEmbeddingFunction:
-    def __init__(self, dimensions: int = 256) -> None:
-        if dimensions < 16:
-            raise ValueError("embedding dimensions must be at least 16")
+class GatewayEmbeddingFunction:
+    def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
 
     def __call__(self, input: list[str]) -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for document in input:
-            vector = [0.0] * self.dimensions
-            for token in _TOKEN_PATTERN.findall(document.casefold()):
-                digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
-                index = int.from_bytes(digest[:4], "little") % self.dimensions
-                sign = 1.0 if digest[4] & 1 else -1.0
-                vector[index] += sign
-            norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-            vectors.append([value / norm for value in vector])
-        return vectors
+        import litellm
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        try:
+            api_key = os.environ.get("OMNIROUTE_API_KEY", "")
+            base_url = os.environ.get("OMNIROUTE_BASE_URL", "http://localhost:20128/v1").rstrip("/")
+            res = litellm.embedding(
+                model="openai/mistral-embed",
+                input=input,
+                api_base=base_url,
+                api_key=api_key
+            )
+            return [item["embedding"] for item in res.data]
+        except Exception as e:
+            import logging
+            logging.error(f"Embedding failed: {e}")
+            return [[0.0] * self.dimensions for _ in input]
+
+HashEmbeddingFunction = GatewayEmbeddingFunction
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -132,7 +139,7 @@ def parse_agent_markdown(path: Path, source_root: Path) -> AgentCreate:
     if len(relative.parts) < 2:
         raise ValueError("agent Markdown must live inside a macro-domain directory")
 
-    metadata, body = _split_frontmatter(path.read_text(encoding="utf-8"))
+    metadata, body = _split_frontmatter(path.read_text(encoding="utf-8-sig"))
     macro_domain = relative.parts[0]
     squad = relative.parts[-2] if len(relative.parts) > 2 else None
 
