@@ -4,25 +4,31 @@ Agentic OS — FastAPI Backend
 Multi-agent orchestration server for opencode, Hermes, agy CLI
 """
 import argparse
+import asyncio
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tarfile
 import time
 import uuid
-from datetime import datetime, timezone
+from collections import deque
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 _scheduler_instance = None
 
@@ -82,6 +88,155 @@ app.add_middleware(NoCacheMiddleware)
 
 BASE_DIR = Path(__file__).parent.resolve()
 
+# ─── FASE 0: Security configuration ──────────────────────────────────────────
+# Config is read from the environment first, then from the repo's .env file.
+# python-dotenv is NOT a dependency of this project, so this is a minimal
+# parser that only handles the KEY=VALUE form already used in .env.example.
+
+def _load_dotenv(path: Path) -> dict:
+    """Minimal .env reader. Supports KEY=VALUE, # comments, and quoted values."""
+    values = {}
+    if not path.exists():
+        return values
+    try:
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            values[key.strip()] = value
+    except OSError:
+        pass
+    return values
+
+
+_dotenv = _load_dotenv(BASE_DIR / ".env")
+
+
+def _config(key: str, default: str = "") -> str:
+    """Environment wins over .env so a deployment can override without editing files."""
+    return os.environ.get(key) or _dotenv.get(key, default)
+
+
+# AGENCY_RECOVERY_MODE bypasses authentication entirely. It only takes effect
+# when explicitly set in the environment, so it requires the same host access
+# that reading .env already requires. This is the documented escape hatch for
+# the lock-out scenario: enabling auth with a lost token would otherwise make
+# the API — including PUT /api/settings — unreachable.
+RECOVERY_MODE = os.environ.get("AGENCY_RECOVERY_MODE") == "1"
+
+API_TOKEN = _config("AGENCY_API_TOKEN")
+API_TOKEN_FROM_ENV = bool(os.environ.get("AGENCY_API_TOKEN"))
+if not API_TOKEN:
+    API_TOKEN = secrets.token_urlsafe(32)
+
+WEBHOOK_SECRET = _config("AGENCY_WEBHOOK_SECRET")
+# Transition window: unsigned webhooks are accepted for 7 days after deploy so
+# existing emitters are not broken instantly. Remove once all senders sign.
+ALLOW_UNSIGNED_WEBHOOKS = _config("ALLOW_UNSIGNED_WEBHOOKS") == "1"
+WEBHOOK_TOLERANCE_SECONDS = 300
+
+# 77 of 78 endpoints are sync `def`, so FastAPI runs them on the AnyIO
+# threadpool (40 threads). /api/chat blocks one thread for up to 180s while a
+# CLI subprocess runs. Without this cap, ~40 concurrent requests saturate the
+# pool and the entire API stops responding.
+MAX_CONCURRENT_AGENT_RUNS = int(_config("AGENCY_MAX_CONCURRENT_RUNS", "8") or "8")
+_agent_slots = None
+
+
+def _get_agent_slots():
+    """Lazily create the semaphore so it binds to the running event loop."""
+    global _agent_slots
+    if _agent_slots is None:
+        _agent_slots = asyncio.Semaphore(MAX_CONCURRENT_AGENT_RUNS)
+    return _agent_slots
+
+
+async def acquire_agent_slot(wait_seconds: float = 30.0) -> None:
+    """Wait for an execution slot; raise HTTP 429 with Retry-After if none frees up."""
+    slots = _get_agent_slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=wait_seconds)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Server busy: all {MAX_CONCURRENT_AGENT_RUNS} execution slots "
+                f"are occupied."
+            ),
+            headers={"Retry-After": str(int(wait_seconds))},
+        )
+
+
+def release_agent_slot() -> None:
+    slots = _get_agent_slots()
+    try:
+        slots.release()
+    except ValueError:
+        pass
+
+
+# ─── Rate limiting (token bucket, stdlib only) ───────────────────────────────
+# slowapi/limits are deliberately NOT added: they are absent from pyproject.toml
+# and adding one would mean touching pyproject.toml, Dockerfile and
+# docker-compose.yml. This is a small, auditable implementation instead.
+
+class TokenBucketLimiter:
+    """Sliding-window rate limiter keyed by (tier, client identity)."""
+
+    def __init__(self, capacity: int, refill_per_sec: float):
+        self.capacity = capacity
+        self.refill_per_sec = refill_per_sec
+        self._hits: dict = {}
+        self._lock = asyncio.Lock()
+
+    async def check(self, key: str) -> tuple:
+        """Return (allowed, retry_after_seconds, remaining)."""
+        async with self._lock:
+            now = time.monotonic()
+            bucket = self._hits.setdefault(key, deque())
+            window = self.capacity / self.refill_per_sec if self.refill_per_sec else 3600.0
+
+            while bucket and (now - bucket[0]) > window:
+                bucket.popleft()
+
+            if len(bucket) >= self.capacity:
+                retry_after = max(1, int(bucket[0] + window - now) + 1)
+                return False, retry_after, 0
+
+            bucket.append(now)
+            return True, 0, self.capacity - len(bucket)
+
+    def reset(self) -> None:
+        self._hits.clear()
+
+
+# Generous defaults for reads; tight budgets for expensive agent executions.
+RATE_LIMITS = {
+    "default": TokenBucketLimiter(capacity=120, refill_per_sec=2.0),
+    "chat": TokenBucketLimiter(capacity=10, refill_per_sec=0.2),
+    "skill": TokenBucketLimiter(capacity=20, refill_per_sec=0.5),
+    "admin": TokenBucketLimiter(capacity=30, refill_per_sec=0.5),
+}
+
+RATE_LIMIT_PREFIXES = (
+    ("/api/chat", "chat"),
+    ("/api/skills", "skill"),
+    ("/api/backup", "admin"),
+    ("/api/settings", "admin"),
+    ("/api/plugins", "admin"),
+)
+
+
+def _rate_tier(path: str) -> str:
+    for prefix, tier in RATE_LIMIT_PREFIXES:
+        if path.startswith(prefix):
+            return tier
+    return "default"
+
 # ─── Models ───────────────────────────────────────────────────────
 
 class BrainUpdate(BaseModel):
@@ -130,23 +285,62 @@ def append_audit(entry: dict):
     audit_file = BASE_DIR / "audit" / "audit.log"
     entry["timestamp"] = get_timestamp()
     entry["id"] = str(uuid.uuid4())[:8]
+    # The audit directory is not tracked in git, so on a fresh clone (or in CI)
+    # appending would raise FileNotFoundError and fail the request that was
+    # trying to record the audit entry.
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
     with open(audit_file, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
 def safe_resolve(base: Path, user_path: str) -> Path:
-    """Resolve a user-supplied path relative to base, preventing traversal."""
-    resolved = (base / user_path).resolve()
-    if not str(resolved).startswith(str(base.resolve())):
+    """Resolve a user-supplied path relative to base, preventing traversal.
+
+    Uses Path.is_relative_to(), NOT str.startswith(). A str.startswith check
+    is a *text* prefix match, so a sibling directory sharing a name prefix
+    passes it: with base=C:/data and user_path='../data-evil/x', the resolved
+    path C:/data-evil/x satisfies startswith('C:/data'). is_relative_to()
+    compares whole path components, so data-evil != data is correctly rejected.
+    """
+    root = base.resolve()
+    resolved = (root / user_path).resolve()
+    if not resolved.is_relative_to(root):
         raise HTTPException(400, "Invalid path")
     return resolved
 
+
 def safe_extractall(tar: tarfile.TarFile, path: Path):
-    """Extract tar archive with path traversal protection."""
-    for member in tar.getmembers():
-        member_path = (path / member.name).resolve()
-        if not str(member_path).startswith(str(path.resolve())):
-            raise HTTPException(400, f"Blocked path traversal: {member.name}")
-    tar.extractall(path=path)
+    """Extract a tar archive with path-traversal and symlink protection.
+
+    filter='data' rejects absolute member paths, '..' traversal, and links that
+    escape the destination. A manual check of member.name is NOT sufficient on
+    its own: a tarball can contain a symlink pointing outside the destination
+    followed by a file written through that link, which never appears as a
+    suspicious member name. filter='data' covers that case, so the manual loop
+    that used to live here has been removed.
+
+    Requires Python 3.12+ (this project targets 3.14.7).
+    """
+    root = path.resolve()
+    tar.extractall(path=root, filter="data")
+
+
+# ─── Git argument-injection guard ──────────────────────────────────
+# `git diff --output=<path>` writes an arbitrary file and `--upload-pack=<cmd>`
+# executes a command, so a bare pass-through of a user-supplied ref is
+# RCE-adjacent. Git treats any argument starting with '-' as a flag, so the
+# allowlist below must reject those outright.
+_GIT_REF_RE = re.compile(r"^(?:HEAD|@{1,2}|[A-Za-z0-9_./^~-]{1,255})$")
+
+
+def validate_git_ref(ref: str) -> str:
+    """Reject any git ref that could be parsed as a flag rather than a revision."""
+    if not ref or len(ref) > 255:
+        raise HTTPException(400, "Invalid git ref")
+    if ref.startswith("-"):
+        raise HTTPException(400, "Invalid git ref")
+    if not _GIT_REF_RE.fullmatch(ref):
+        raise HTTPException(400, "Invalid git ref")
+    return ref
 
 def validate_identifier(value: str, pattern: str, label: str = "name") -> str:
     """Reject path separators / traversal before using a value in a filesystem path."""
@@ -171,10 +365,17 @@ class SecurityHeadersMiddleware:
                 extra = [
                     (b"x-content-type-options", b"nosniff"),
                     (b"x-frame-options", b"DENY"),
-                    (b"x-xss-protection", b"1; mode=block"),
-                    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
                     (b"referrer-policy", b"strict-origin-when-cross-origin"),
                 ]
+                # HSTS is only meaningful over TLS. The server binds loopback
+                # and serves plain HTTP, where this header is a no-op that
+                # merely hides the absence of TLS. Emit it only when the
+                # request actually arrived over HTTPS (e.g. behind a proxy).
+                if scope.get("scheme") == "https":
+                    extra.append(
+                        (b"strict-transport-security",
+                         b"max-age=31536000; includeSubDomains")
+                    )
                 # Only add CSP for non-API routes (dashboard HTML)
                 path = scope.get("path", "")
                 if not path.startswith("/api/"):
@@ -194,6 +395,140 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# ─── FASE 0: Auth + Rate limiting middleware ─────────────────────────────────
+# These are registered AFTER SecurityHeadersMiddleware because Starlette wraps
+# middleware in reverse registration order: the last one added runs first.
+# Both are pure-ASGI so they run before routing and require no change to the 78
+# existing @app decorators — the project uses no APIRouter, so a global
+# `dependencies=[...]` was not an option.
+
+AUTH_HEADER = b"x-agentic-token"
+
+
+def _json_error(status: int, detail: str, headers: dict = None):
+    payload = json.dumps({"detail": detail}).encode("utf-8")
+    raw = [(b"content-type", b"application/json"),
+           (b"content-length", str(len(payload)).encode())]
+    for key, value in (headers or {}).items():
+        raw.append((key.encode("latin-1"), str(value).encode("latin-1")))
+
+    async def send_json(send):
+        await send({"type": "http.response.start", "status": status, "headers": raw})
+        await send({"type": "http.response.body", "body": payload})
+
+    return send_json
+
+
+class AuthRateLimitMiddleware:
+    """Enforces the static API token and per-tier rate limits on /api/*.
+
+    Exempt paths: /api/status (the SPA reads it before it has a token, and it
+    exposes nothing sensitive) and non-/api assets (the dashboard itself).
+    """
+
+    EXEMPT_PATHS = {"/api/status"}
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if not path.startswith("/api/") or path in self.EXEMPT_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        provided = headers.get(AUTH_HEADER, b"").decode("latin-1")
+
+        # AGENCY_RECOVERY_MODE=1 is the documented lock-out escape hatch.
+        if not RECOVERY_MODE:
+            if not provided:
+                await _json_error(
+                    401, "Missing X-Agentic-Token header.",
+                    {"WWW-Authenticate": "ApiKey"},
+                )(send)
+                return
+            # Constant-time compare: a plain == leaks timing information.
+            if not hmac.compare_digest(provided, API_TOKEN):
+                await _json_error(
+                    401, "Invalid API token.",
+                    {"WWW-Authenticate": "ApiKey"},
+                )(send)
+                return
+
+        # Key on the token when present so one client behind a shared NAT
+        # cannot exhaust every other client's quota.
+        client_ip = (scope.get("client") or ("unknown",))[0]
+        identity = provided or client_ip
+        tier = _rate_tier(path)
+        limiter = RATE_LIMITS[tier]
+
+        allowed, retry_after, remaining = await limiter.check(f"{tier}:{identity}")
+        if not allowed:
+            await _json_error(
+                429,
+                f"Rate limit exceeded for tier '{tier}'. Retry in {retry_after}s.",
+                {
+                    "Retry-After": retry_after,
+                    "X-RateLimit-Limit": limiter.capacity,
+                    "X-RateLimit-Remaining": 0,
+                    "X-RateLimit-Reset": int(time.time()) + retry_after,
+                },
+            )(send)
+            return
+
+        async def send_with_rate_headers(message):
+            if message["type"] == "http.response.start":
+                message["headers"] = list(message.get("headers", [])) + [
+                    (b"x-ratelimit-limit", str(limiter.capacity).encode()),
+                    (b"x-ratelimit-remaining", str(remaining).encode()),
+                    (b"x-ratelimit-reset", str(int(time.time() + 60)).encode()),
+                ]
+            await send(message)
+
+        await self.app(scope, receive, send_with_rate_headers)
+
+
+app.add_middleware(AuthRateLimitMiddleware)
+
+
+# ─── Webhook signature verification ─────────────────────────────────────────
+
+def verify_webhook_signature(signature: str, timestamp: str, raw_body: bytes) -> bool:
+    """Verify HMAC-SHA256 over f"{timestamp}.{raw_body}".
+
+    Returns True when the webhook may be processed. During the transition
+    window (ALLOW_UNSIGNED_WEBHOOKS=1) a request with no signature headers is
+    accepted; a request that *does* send them must still verify correctly.
+    """
+    if not signature or not timestamp:
+        # No signature supplied at all — allowed only inside the window.
+        return ALLOW_UNSIGNED_WEBHOOKS
+
+    if not WEBHOOK_SECRET:
+        print("[SECURITY] Webhook signature supplied but AGENCY_WEBHOOK_SECRET is unset.")
+        return False
+
+    try:
+        sent_at = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+
+    # Anti-replay: reject stale or future-dated timestamps.
+    if abs(time.time() - sent_at) > WEBHOOK_TOLERANCE_SECONDS:
+        return False
+
+    expected = hmac.new(
+        WEBHOOK_SECRET.encode("utf-8"),
+        f"{timestamp}.".encode("utf-8") + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
 # ─── Agent Discovery (instant filesystem checks) ────────────────────
 
@@ -574,8 +909,22 @@ def update_settings(data: SettingsUpdate):
 # ─── Routes: Webhooks & Scheduler Events (v0.3.0) ─────────────────
 
 @app.post("/api/webhook")
-def webhook_receiver(data: dict):
-    """Generic webhook receiver — triggers skill execution by event type."""
+async def webhook_receiver(request: Request):
+    """Generic webhook receiver — triggers skill execution by event type.
+
+    Requires an HMAC-SHA256 signature over f"{timestamp}.{body}" sent as
+    X-Signature + X-Agentic-Timestamp. Unsigned requests are only accepted
+    while ALLOW_UNSIGNED_WEBHOOKS=1 (7-day migration window).
+    """
+    raw = await request.body()
+    if not verify_webhook_signature(
+        request.headers.get("X-Signature"),
+        request.headers.get("X-Agentic-Timestamp"),
+        raw,
+    ):
+        raise HTTPException(401, "Invalid or missing webhook signature")
+
+    data = json.loads(raw or b"{}")
     event_type = data.get("event", data.get("type", "unknown"))
     skill_name = data.get("skill", "")
     payload = data.get("payload", {})
@@ -821,9 +1170,47 @@ def save_chat_message(msg: dict):
         history["messages"] = history["messages"][-200:]
     CHAT_HISTORY_FILE.write_text(json.dumps(history, indent=2))
 
-def run_cli(args: list, timeout: int = 30) -> tuple:
-    r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+def run_cli(args: list, timeout: int = 30, stdin_payload: str = None) -> tuple:
+    """Spawn a CLI without invoking a shell.
+
+    shell=False is the default and must stay that way: it is what prevents
+    injection through the arguments themselves.
+
+    When the payload is user-controlled, pass it as stdin_payload rather than
+    as an argument wherever the CLI supports that. `hermes chat --query-file -`
+    is documented as "safe for arbitrary text: nothing is shell-interpreted,
+    so quotes, $(...), and backticks are preserved verbatim". `opencode run`
+    has no documented stdin, so for that CLI the caller must validate argv
+    instead (see assert_safe_payload).
+    """
+    r = subprocess.run(
+        args,
+        input=stdin_payload,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        shell=False,
+    )
     return r.returncode, r.stdout, r.stderr
+
+
+def assert_safe_payload(payload: str, label: str = "payload") -> str:
+    """Reject a payload that would be parsed as a CLI flag if passed as an argv.
+
+    Needed for CLIs with no stdin path (opencode run, agy): an argument
+    beginning with '-' is interpreted as an option, not as message text.
+    Anything starting with '-' or containing NUL is refused outright.
+    """
+    if payload is None:
+        raise HTTPException(400, "Missing message")
+    if payload.startswith("-"):
+        raise HTTPException(
+            400,
+            f"Invalid {label}: must not begin with '-' (it would be parsed as a CLI flag)",
+        )
+    if "\x00" in payload:
+        raise HTTPException(400, f"Invalid {label}: contains NUL byte")
+    return payload
 
 def clean_hermes_output(raw: str) -> str:
     """Strip CLI metadata from Hermes output, returning only the AI response."""
@@ -854,6 +1241,9 @@ def execute_agent(agent: str, message: str) -> str:
     try:
         if agent == "opencode":
             try:
+                # opencode run has no documented stdin path, so the argv is
+                # validated instead of routed around.
+                assert_safe_payload(message, "message")
                 code, out, err = run_cli(["opencode", "run", "--format", "json", message], timeout=30)
             except subprocess.TimeoutExpired:
                 return f"⏱ Agent 'opencode' timed out.\n\nOpenCode's model is taking too long. Try running `opencode run \"{message[:60]}\"` directly in your terminal.\n\n**Message:** {message[:100]}"
@@ -879,7 +1269,15 @@ def execute_agent(agent: str, message: str) -> str:
 
         elif agent == "hermes":
             try:
-                code, out, err = run_cli(["hermes", "chat", "-q", message], timeout=180)
+                # `hermes chat --query-file -` reads the query from stdin and is
+                # documented as shell-safe ("nothing is shell-interpreted, so
+                # quotes, $(...), and backticks are preserved verbatim"), so the
+                # user payload never becomes an argv element.
+                code, out, err = run_cli(
+                    ["hermes", "chat", "--query-file", "-", "--oneshot"],
+                    timeout=180,
+                    stdin_payload=message,
+                )
             except subprocess.TimeoutExpired:
                 return f"⏱ Hermes timed out.\n\nThe model took too long to respond. Try a shorter query or check your OpenRouter rate limits.\n\n**Message:** {message[:100]}"
             if code == 0:
@@ -915,7 +1313,7 @@ def execute_agent(agent: str, message: str) -> str:
         return f"⚠ Error communicating with {agent}: {str(e)}"
 
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+async def chat(req: ChatRequest):
     agent = req.agent.lower().strip()
     if agent not in ["opencode", "hermes", "agy"]:
         raise HTTPException(400, "Agent must be one of: opencode, hermes, agy")
@@ -925,29 +1323,39 @@ def chat(req: ChatRequest):
     if len(message) > 10000:
         raise HTTPException(400, "Message too long (max 10000 characters)")
 
-    user_msg = {
-        "id": str(uuid.uuid4())[:8],
-        "role": "user",
-        "agent": agent,
-        "content": message,
-        "timestamp": get_timestamp(),
-    }
-    save_chat_message(user_msg)
+    # Bound concurrent agent executions. Without this, ~40 concurrent chats
+    # saturate the AnyIO threadpool (77/78 endpoints are sync `def`) and the
+    # whole API stops responding for up to 180s.
+    await acquire_agent_slot()
 
-    response_text = execute_agent(agent, message)
+    try:
+        user_msg = {
+            "id": str(uuid.uuid4())[:8],
+            "role": "user",
+            "agent": agent,
+            "content": message,
+            "timestamp": get_timestamp(),
+        }
+        save_chat_message(user_msg)
 
-    agent_msg = {
-        "id": str(uuid.uuid4())[:8],
-        "role": "assistant",
-        "agent": agent,
-        "content": response_text,
-        "timestamp": get_timestamp(),
-    }
-    save_chat_message(agent_msg)
+        # execute_agent blocks (subprocess, up to 180s), so it must not run on
+        # the event loop itself — offload it to the threadpool.
+        response_text = await run_in_threadpool(execute_agent, agent, message)
 
-    append_audit({"action": "chat_message", "agent": agent, "msg_preview": message[:50]})
+        agent_msg = {
+            "id": str(uuid.uuid4())[:8],
+            "role": "assistant",
+            "agent": agent,
+            "content": response_text,
+            "timestamp": get_timestamp(),
+        }
+        save_chat_message(agent_msg)
 
-    return {"status": "ok", "response": agent_msg}
+        append_audit({"action": "chat_message", "agent": agent, "msg_preview": message[:50]})
+
+        return {"status": "ok", "response": agent_msg}
+    finally:
+        release_agent_slot()
 
 @app.get("/api/chat/history")
 def get_chat_history(q: str = Query(""), agent: str = Query(""), limit: int = Query(200, le=1000)):
@@ -1653,6 +2061,8 @@ def get_diff(file: str = Query(""), ref: str = Query("HEAD")):
     try:
         if not file:
             raise HTTPException(400, "Query parameter 'file' is required")
+        # Reject refs that git would parse as a flag (--output=, --upload-pack=).
+        ref = validate_git_ref(ref)
         # Prevent traversal — allow only repo-relative paths
         resolved = (BASE_DIR / file).resolve()
         if not str(resolved).startswith(str(BASE_DIR.resolve()) + os.sep) and resolved != BASE_DIR:
@@ -1660,6 +2070,8 @@ def get_diff(file: str = Query(""), ref: str = Query("HEAD")):
         if not resolved.exists():
             raise HTTPException(404, "File not found")
         rel = str(resolved.relative_to(BASE_DIR))
+        # The '--' separator is correct and required for git: everything after
+        # it is treated as a pathspec, never as an option.
         code, out, err = run_cli(["git", "-C", str(BASE_DIR), "diff", ref, "--", rel], timeout=10)
         if code == 0 and not out.strip():
             # no diff against ref — try working tree vs index
@@ -1760,5 +2172,39 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser.add_argument(
+        "--insecure-allow-remote",
+        action="store_true",
+        help=(
+            "Bind a non-loopback address even though AGENCY_API_TOKEN is not "
+            "set. This exposes all /api endpoints, including backup restore, "
+            "to the network. Use only when a token is already exported."
+        ),
+    )
     args = parser.parse_args()
+
+    if RECOVERY_MODE:
+        print("[SECURITY WARNING] AGENCY_RECOVERY_MODE=1 - authentication is DISABLED.")
+
+    if not API_TOKEN_FROM_ENV and not _dotenv.get("AGENCY_API_TOKEN"):
+        print(
+            "[SECURITY] No AGENCY_API_TOKEN configured. Generated an ephemeral "
+            "token for this process only - it changes on every restart:\n"
+            f"    {API_TOKEN}\n"
+            "Set AGENCY_API_TOKEN in the environment (or in .env) to persist it."
+        )
+
+    if (
+        args.host not in ("127.0.0.1", "localhost", "::1")
+        and not API_TOKEN_FROM_ENV
+        and not args.insecure_allow_remote
+    ):
+        raise SystemExit(
+                f"Refusing to bind {args.host} without AGENCY_API_TOKEN.\n"
+                "An unauthenticated remote bind exposes all 78 /api endpoints, "
+                "including POST /api/backup/restore.\n"
+                "Set AGENCY_API_TOKEN, or pass --insecure-allow-remote to "
+                "override this check."
+            )
+
     uvicorn.run(app, host=args.host, port=args.port)
