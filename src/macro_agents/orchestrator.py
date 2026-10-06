@@ -36,7 +36,7 @@ from src.orchestration.kanban import (
 )
 from src.orchestration.linear_client import LinearClient
 from src.router.semantic import DEFAULT_DB_URL, RouteAgentResult, route_agent
-from src.state import StateManager
+from src.state.manager import StateManager, record_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,63 @@ class OrchestrationResult:
         }
 
 
+
+def _post_task_telemetry(
+    task: Any,
+    result: Any,
+    *,
+    latency_ms: float = 0.0,
+    journal_path: Path | str = Path("data/journal.jsonl"),
+) -> dict[str, Any]:
+    """Hook pós-execução que grava métricas de execução em data/journal.jsonl."""
+    task_id = getattr(task, "task_id", "") or getattr(result, "task_id", "")
+
+    # Director resolution
+    director = "unknown"
+    if hasattr(result, "route") and getattr(result.route, "agent_id", None):
+        director = result.route.agent_id
+    elif getattr(task, "assignee", None):
+        director = task.assignee
+    elif getattr(task, "macro_domain", None):
+        director = task.macro_domain
+
+    # Retries calculation
+    retries = getattr(task, "retries", 0)
+    if not retries and hasattr(task, "audit_trail"):
+        retries = sum(
+            1
+            for entry in getattr(task, "audit_trail", [])
+            if getattr(entry, "from_status", "") in ("blocked", "review")
+            and getattr(entry, "to_status", "") in ("ready", "in_progress")
+        )
+
+    # Human corrected check
+    human_corrected = bool(getattr(task, "human_corrected", False))
+    if not human_corrected and hasattr(task, "audit_trail"):
+        for entry in getattr(task, "audit_trail", []):
+            actor = str(getattr(entry, "actor", "")).lower()
+            if actor in ("human", "user", "admin", "operator") or getattr(entry, "human_corrected", False):
+                human_corrected = True
+                break
+
+    # Tokens estimation/retrieval
+    tokens = getattr(result, "tokens", 0) or 0
+    if not tokens and hasattr(result, "skill_match") and getattr(result.skill_match, "skill", None):
+        tokens = getattr(result.skill_match.skill, "token_budget", 0) or 0
+
+    metrics = {
+        "task_id": str(task_id),
+        "director": str(director),
+        "retries": int(retries),
+        "human_corrected": bool(human_corrected),
+        "tokens": int(tokens),
+        "latency_ms": round(float(latency_ms), 2),
+        "timestamp": time.time(),
+    }
+    record_telemetry(metrics, journal_path=journal_path)
+    return metrics
+
+
 # ── Orchestrator ──────────────────────────────────────────────
 
 class MacroOrchestrator:
@@ -145,6 +202,7 @@ class MacroOrchestrator:
         query: str | None = None,
     ) -> OrchestrationResult:
         """Execute orchestration for an existing task on the board."""
+        start_time = time.time()
         result = OrchestrationResult(task_id=task.task_id, status="pending")
         query = query or task.title
 
@@ -355,8 +413,22 @@ class MacroOrchestrator:
             result.status = "error"
             result.error = str(exc)
             logger.exception("Orchestration error")
+        finally:
+            latency_ms = (time.time() - start_time) * 1000.0
+            self._post_task_telemetry(task, result, latency_ms=latency_ms)
 
         return result
+
+    def _post_task_telemetry(
+        self,
+        task: KanbanTask,
+        result: OrchestrationResult,
+        *,
+        latency_ms: float = 0.0,
+        journal_path: Path | str = Path("data/journal.jsonl"),
+    ) -> dict[str, Any]:
+        """Post-execution telemetry hook recorded in data/journal.jsonl."""
+        return _post_task_telemetry(task, result, latency_ms=latency_ms, journal_path=journal_path)
 
     def on_skill_discovered(
         self,

@@ -185,6 +185,15 @@ class StateManager:
                     entries.append(record)
         return entries
 
+    def record_telemetry(
+        self,
+        metrics: dict[str, Any],
+        journal_path: Path | str | None = None,
+    ) -> dict[str, Any]:
+        """Record post-task execution telemetry in journal.jsonl."""
+        target = Path(journal_path) if journal_path is not None else Path("data/journal.jsonl")
+        return record_telemetry(metrics, journal_path=target)
+
     # ── Internals ──────────────────────────────────────────────
 
     @contextmanager
@@ -216,3 +225,27 @@ class StateManager:
             fh.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
+
+
+def record_telemetry(
+    metrics: dict[str, Any],
+    journal_path: Path | str = Path("data/journal.jsonl"),
+) -> dict[str, Any]:
+    """Append a post-execution telemetry record to data/journal.jsonl.
+
+    Ensures thread-safe and process-safe writing with advisory file locking.
+    """
+    target = Path(journal_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.parent / f".{target.name}.lock"
+    lock = _FileLock(lock_path)
+    lock.acquire()
+    try:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(metrics, ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    finally:
+        lock.release()
+    return metrics
+
