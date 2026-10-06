@@ -11,9 +11,9 @@ Now integrated with Linear GraphQL API for cloud state synchronization.
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
-import logging
 from enum import Enum
 from typing import Any
 
@@ -70,6 +70,9 @@ class AuditEntry(BaseModel):
     reason: str = ""
 
 
+MISSING_SKILL = "MISSING_SKILL"
+
+
 class KanbanTask(BaseModel):
     """A single task on the Kanban board."""
 
@@ -83,6 +86,8 @@ class KanbanTask(BaseModel):
     assignee: str = ""
     macro_domain: str = ""
     block_reason: str = ""
+    blocked_reason: str | None = None
+    parent_task_id: str | None = None
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     audit_trail: list[AuditEntry] = Field(default_factory=list)
@@ -121,7 +126,7 @@ class KanbanBoard:
                 
                 # If using Linear, we primarily care about the READY column for the scheduler
                 return {KanbanStatus.READY.value: ready_tasks}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f"Failed to fetch tasks from Linear: {e}")
 
         # Fallback local logic
@@ -173,8 +178,10 @@ class KanbanBoard:
 
         if to_status == KanbanStatus.BLOCKED:
             task.block_reason = reason
+            task.blocked_reason = reason
         elif from_status == KanbanStatus.BLOCKED:
             task.block_reason = ""
+            task.blocked_reason = None
 
         # Update Linear if configured
         if self.linear:
