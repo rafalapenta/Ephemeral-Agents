@@ -92,3 +92,16 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# === BANCO DE DADOS VETORIAL & DADOS DE EXECUÇÃO ===
+chroma/
+state_data/
+
+# === TRAVAS E LOGS DE ESTADO LOCAL ===
+*.lock
+data/*.lock
+data/hotpatch_history.jsonl
+data/journal.jsonl
+
+# === CONFIGURAÇÕES LOCAIS / MCP ===
+data/.mcp.json
