@@ -69,10 +69,50 @@ class OrchestrationResult:
     def all_gates_passed(self) -> bool:
         return all(g.passed for g in self.gates)
 
+    @property
+    def director_id(self) -> str | None:
+        return self.route.agent_id if self.route else None
+
+    @property
+    def resolved_skill_id(self) -> str | None:
+        if self.skill_match and self.skill_match.skill:
+            return self.skill_match.skill.id
+        if self.skill_match:
+            return self.skill_match.candidate_id
+        return None
+
+    @property
+    def adherence_score(self) -> float:
+        return self.skill_match.score if self.skill_match else 0.0
+
+    @property
+    def kanban_status(self) -> str:
+        return self.status
+
+    @property
+    def blocked_reason(self) -> str | None:
+        return self.error if self.status == "blocked" else None
+
+    @property
+    def escalation_subtask_id(self) -> str | None:
+        return self.subtask_id
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.to_dict().get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "status": self.status,
+            "kanban_status": self.kanban_status,
+            "director_id": self.director_id,
+            "resolved_skill_id": self.resolved_skill_id,
+            "adherence_score": self.adherence_score,
+            "blocked_reason": self.blocked_reason,
+            "escalation_subtask_id": self.escalation_subtask_id,
             "route": self.route.model_dump(mode="json") if self.route else None,
             "skill_match": (
                 {
@@ -184,11 +224,13 @@ class MacroOrchestrator:
         source_root: Path | str | None = None,
         threshold: float = 0.30,
         handoff_fn: Any | None = litellm_handoff,
+        dry_run: bool = False,
     ) -> None:
         self.state = StateManager(state_dir=state_dir)
-        self.board = KanbanBoard()
+        self.dry_run = dry_run
+        self.board = KanbanBoard(sync_linear=not dry_run)
         self.threshold = threshold
-        self.handoff_fn = handoff_fn
+        self.handoff_fn = None if dry_run else handoff_fn
 
         # Router config (passthrough to route_agent)
         self._db_url = database_url
@@ -375,19 +417,20 @@ class MacroOrchestrator:
             self.board.transition(task.task_id, KanbanStatus.REVIEW, actor="orchestrator")
             
             # Post comment to Linear
-            try:
-                linear = LinearClient()
-                if handoff_result.get("status") == "success":
-                    comment_body = (
-                        f"**Task executed by {route_result.agent_id}**\n\n"
-                        f"{handoff_result.get('reply', 'No reply content.')}"
-                    )
-                else:
-                    error_msg = handoff_result.get('error', 'Unknown error')
-                    comment_body = f"⚠️ **Task execution failed:** {error_msg}\n\nPlease check the agent logs and `.env` credentials."
-                linear.add_comment(task.task_id, comment_body)
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"Failed to post comment to Linear: {e}")
+            if not getattr(self, "dry_run", False):
+                try:
+                    linear = LinearClient()
+                    if handoff_result.get("status") == "success":
+                        comment_body = (
+                            f"**Task executed by {route_result.agent_id}**\n\n"
+                            f"{handoff_result.get('reply', 'No reply content.')}"
+                        )
+                    else:
+                        error_msg = handoff_result.get('error', 'Unknown error')
+                        comment_body = f"⚠️ **Task execution failed:** {error_msg}\n\nPlease check the agent logs and `.env` credentials."
+                    linear.add_comment(task.task_id, comment_body)
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"Failed to post comment to Linear: {e}")
 
             self.board.transition(task.task_id, KanbanStatus.DONE, actor="orchestrator", reason="handoff completed")
 
@@ -554,9 +597,9 @@ class MacroOrchestrator:
 
         if isinstance(task_data, dict):
             task_title = task_data.get("title") or title or "Untitled Task"
-            task_body = task_data.get("body", body)
+            task_body = task_data.get("description") or task_data.get("body", body)
             task_priority = task_data.get("priority", priority)
-            task_assignee = task_data.get("assignee", assignee)
+            task_assignee = task_data.get("expected_director") or task_data.get("assignee", assignee)
             task_query = task_data.get("query") or task_data.get("prompt") or query
             task_source = task_data.get("source_agent", source_agent)
             task = KanbanTask(

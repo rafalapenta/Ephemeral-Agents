@@ -100,12 +100,15 @@ class KanbanBoard:
     the StateManager lock when mutating shared board state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sync_linear: bool = True) -> None:
         self._tasks: dict[str, KanbanTask] = {}
         self._linear = None
+        self._sync_linear = sync_linear
 
     @property
     def linear(self):
+        if not self._sync_linear:
+            return None
         if self._linear is None:
             from src.orchestration.linear_client import get_linear_client
             self._linear = get_linear_client()
