@@ -167,6 +167,7 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
     print(f"   * Total de Efêmeros Spawnados: {cost_report['ephemeral_count']}/{limits.max_ephemerals_per_task}")
     print(f"   * Tokens Totais: {cost_report['total_tokens']}/{limits.max_tokens_per_task}")
     print(f"   * Custo Total Estimado: ${cost_report['total_cost_usd']:.4f} / ${limits.max_cost_usd_per_task:.2f}")
+    print(f"   * Fonte do Cálculo de Custo: {cost_report.get('cost_source')}")
     print(f"   * Limites Atingidos: {cost_report['limits_hit'] or 'Nenhum (Operação Segura)'}")
 
     print("\n" + "=" * 60)
