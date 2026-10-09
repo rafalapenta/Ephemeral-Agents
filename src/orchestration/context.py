@@ -82,7 +82,7 @@ def _compress(
         for key, value in obj.items():
             if key in drops and key not in essentials:
                 continue
-            if key in essentials and isinstance(value, str):
+            if key in ("system_prompt", "ephemeral_skill_md") and isinstance(value, str):
                 result[key] = value
             else:
                 result[key] = _compress(
