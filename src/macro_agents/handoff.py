@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 import litellm
@@ -13,7 +14,7 @@ from src.gateway.models import estimate_cost, resolve_model
 from src.governance.limits import EphemeralLimits, record_task_cost
 from src.macro_agents.ephemeral import SPAWN_EPHEMERAL_TOOL, execute_ephemeral_task
 from src.memory.obsidian import ObsidianMemory
-from src.orchestration.context import compress_context
+from src.orchestration.context import compress_context, sanitize_context
 from src.orchestration.kanban import KanbanBoard, KanbanStatus, KanbanTask
 from src.router.semantic import RouteAgentResult
 from src.state.manager import StateManager
@@ -21,11 +22,22 @@ from src.state.manager import StateManager
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class HandoffRuntime:
+    """Runtime services and governance objects passed outside prompt context."""
+
+    state_manager: StateManager | None = None
+    db_url: str | None = None
+    limits: EphemeralLimits | None = None
+    adherence_score: float = 1.0
+    board: KanbanBoard | None = None
+
+
 @runtime_checkable
 class HandoffFn(Protocol):
     """Standard protocol for handoff execution functions.
     
-    All handoff implementations must accept (task, route, context).
+    All handoff implementations must accept (task, route, context, runtime).
     """
 
     def __call__(
@@ -33,6 +45,7 @@ class HandoffFn(Protocol):
         task: KanbanTask,
         route: RouteAgentResult,
         context: dict[str, Any],
+        runtime: HandoffRuntime | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -51,6 +64,7 @@ def litellm_handoff(
     task: KanbanTask,
     route: RouteAgentResult,
     context: dict[str, Any] | None = None,
+    runtime: HandoffRuntime | None = None,
     *,
     board: KanbanBoard | None = None,
     database_url: str | None = None,
@@ -67,11 +81,12 @@ def litellm_handoff(
     start_time = time.time()
     logger.info("Initiating LiteLLM handoff for task %s to agent %s", task.task_id, route.agent_id)
 
-    # Extract helper services from context if provided
-    active_board = board or (context.get("_board") if context else None)
-    db_url = database_url or (context.get("_db_url") if context else None)
-    active_limits = limits or (context.get("_limits") if context else None) or EphemeralLimits()
-    active_state = state_manager or (context.get("_state_manager") if context else None)
+    # Extract helper services strictly from runtime or kwargs, never from context
+    active_board = (runtime.board if runtime else None) or board
+    db_url = (runtime.db_url if runtime else None) or database_url
+    active_limits = (runtime.limits if runtime else None) or limits or EphemeralLimits()
+    active_state = (runtime.state_manager if runtime else None) or state_manager
+    adherence = (runtime.adherence_score if runtime else None) or (context.get("adherence_score") if context else 1.0)
 
     # 1. Fetch memory from Obsidian
     obsidian = ObsidianMemory()
@@ -87,9 +102,10 @@ def litellm_handoff(
         sys_prompt = f"{sys_prompt}\n\n{memory_context}"
 
     if context:
+        sanitized = sanitize_context(context)
         user_context = {
-            k: v for k, v in context.items()
-            if not k.startswith("_") and k != "system_prompt"
+            k: v for k, v in sanitized.items()
+            if k != "system_prompt"
         }
     else:
         handoff_context = {
@@ -100,7 +116,7 @@ def litellm_handoff(
             "macro_domain": route.macro_domain,
             "target_agent": route.agent_id,
         }
-        user_context = compress_context(handoff_context)
+        user_context = sanitize_context(compress_context(handoff_context))
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": sys_prompt},
@@ -171,7 +187,7 @@ def litellm_handoff(
                     task_id=task.task_id,
                     skill_id=skill_id,
                     is_ephemeral=False,
-                    adherence_score=context.get("adherence_score", 1.0) if context else 1.0,
+                    adherence_score=adherence,
                     outcome="limit_exceeded",
                     gates_passed=False,
                     model=used_model,
@@ -326,7 +342,7 @@ def litellm_handoff(
             task_id=task.task_id,
             skill_id=skill_id,
             is_ephemeral=False,
-            adherence_score=context.get("adherence_score", 1.0) if context else 1.0,
+            adherence_score=adherence,
             outcome="success",
             gates_passed=True,
             model=used_model,
@@ -371,7 +387,7 @@ def litellm_handoff(
             task_id=task.task_id,
             skill_id=skill_id,
             is_ephemeral=False,
-            adherence_score=context.get("adherence_score", 0.0) if context else 0.0,
+            adherence_score=adherence,
             outcome="failure",
             gates_passed=False,
             model=used_model,

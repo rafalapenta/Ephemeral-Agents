@@ -681,14 +681,20 @@ def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypat
 
 def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
     """Test PONTO 2: Standardized handoff_fn signature receives task, route_result, and context."""
-    from src.macro_agents.handoff import HandoffFn
+    from src.macro_agents.handoff import HandoffFn, HandoffRuntime
 
     received_args = {}
 
-    def custom_handoff(task: KanbanTask, route: RouteAgentResult, context: dict) -> dict:
+    def custom_handoff(
+        task: KanbanTask,
+        route: RouteAgentResult,
+        context: dict,
+        runtime: HandoffRuntime | None = None,
+    ) -> dict:
         received_args["task"] = task
         received_args["route"] = route
         received_args["context"] = context
+        received_args["runtime"] = runtime
         return {"status": "success", "agent_id": route.agent_id, "reply": "Handled custom"}
 
     # Verify custom_handoff matches HandoffFn protocol
@@ -731,6 +737,91 @@ def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pyt
     assert received_args["route"].agent_id == "vulcan"
     assert isinstance(received_args["context"], dict)
     assert "system_prompt" in received_args["context"]
+
+
+def test_context_sanitization_removes_private_and_non_serializable_objects(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 3: Verify sanitize_context strips '_' keys and non-JSON serializable objects from LLM messages."""
+    from src.macro_agents.handoff import HandoffRuntime
+
+    class DummyUnserializableObject:
+        def __init__(self):
+            self.internal_fn = lambda x: x
+
+    dummy_obj = DummyUnserializableObject()
+
+    dirty_context = {
+        "task_id": "task-clean-123",
+        "title": "Task Clean Test",
+        "system_prompt": "You are Vulcan the engineer.",
+        "_state_manager": object(),
+        "_db_url": "sqlite:///secret_database.db",
+        "_limits": EphemeralLimits(),
+        "unserializable_obj": dummy_obj,
+        "public_data": "visible_payload_value",
+    }
+
+    captured_messages = []
+
+    def mock_completion(**kwargs):
+        captured_messages.extend(kwargs.get("messages", []))
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Task finished cleanly"
+        mock_choice.message.tool_calls = None
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}
+        return mock_resp
+
+    monkeypatch.setattr("litellm.completion", mock_completion)
+
+    task = KanbanTask(
+        title="Sanitization Test Task",
+        body="Verify context clean",
+        priority="high",
+    )
+
+    route = RouteAgentResult(
+        matched=True,
+        score=0.95,
+        agent_id="vulcan",
+        name="Vulcan",
+        macro_domain="engineering",
+        system_prompt="# Vulcan System",
+        tools=[],
+        reason="matched",
+    )
+
+    runtime = HandoffRuntime(
+        db_url=setup_ephemeral_db["db_url"],
+        limits=EphemeralLimits(),
+        adherence_score=0.95,
+    )
+
+    res = litellm_handoff(
+        task=task,
+        route=route,
+        context=dirty_context,
+        runtime=runtime,
+        tools_enabled=False,
+    )
+
+    assert res["status"] == "success"
+
+    # Convert all message contents to string
+    all_content_str = "\n".join(str(m.get("content", "")) for m in captured_messages)
+
+    # Assert internal / private / non-serializable fields were completely excluded
+    assert "_state_manager" not in all_content_str
+    assert "_db_url" not in all_content_str
+    assert "secret_database.db" not in all_content_str
+    assert "_limits" not in all_content_str
+    assert "unserializable_obj" not in all_content_str
+    assert "DummyUnserializableObject" not in all_content_str
+
+    # Assert valid data IS present
+    assert "public_data" in all_content_str
+    assert "visible_payload_value" in all_content_str
+
 
 
 

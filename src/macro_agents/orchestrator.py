@@ -412,18 +412,22 @@ class MacroOrchestrator:
                 )
             )
 
-            # Handoff context setup with limits & board
+            # Handoff runtime services and governance
             from src.governance.limits import EphemeralLimits
-            limits = EphemeralLimits()
-            compressed["_limits"] = limits
-            compressed["_board"] = self.board
-            compressed["_db_url"] = self._db_url
-            compressed["_state_manager"] = self.state
-            compressed["adherence_score"] = skill_match.score if skill_match else 1.0
+            from src.macro_agents.handoff import HandoffRuntime
 
-            # Handoff
+            limits = EphemeralLimits()
+            runtime = HandoffRuntime(
+                state_manager=self.state,
+                db_url=self._db_url,
+                limits=limits,
+                adherence_score=skill_match.score if skill_match else 1.0,
+                board=self.board,
+            )
+
+            # Handoff (clean context without internal runtime objects)
             if self.handoff_fn is not None:
-                handoff_result = self.handoff_fn(task, route_result, compressed)
+                handoff_result = self.handoff_fn(task, route_result, compressed, runtime=runtime)
             else:
                 handoff_result = {
                     "status": "simulated",

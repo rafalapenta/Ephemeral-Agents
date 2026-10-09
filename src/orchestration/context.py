@@ -150,3 +150,31 @@ def inject_ephemeral_skill(
     payload["ephemeral_skill_md"] = content_md
     return payload
 
+
+def sanitize_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Sanitize context dictionary by removing private keys and non-JSON serializable objects.
+    
+    - Strips any key starting with '_' (e.g. '_state_manager', '_db_url', '_limits')
+    - Drops any value that fails json.dumps serialization (e.g. class instances, functions, modules)
+    """
+    import json
+    import logging
+    _log = logging.getLogger(__name__)
+
+    if not context or not isinstance(context, dict):
+        return {}
+
+    sanitized: dict[str, Any] = {}
+    for k, v in context.items():
+        if str(k).startswith("_"):
+            continue
+        try:
+            # Verify JSON serializability
+            json.dumps(v)
+            sanitized[k] = v
+        except (TypeError, OverflowError, ValueError) as err:
+            _log.debug("sanitize_context dropped non-serializable key '%s': %s", k, err)
+            continue
+
+    return sanitized
+
