@@ -52,7 +52,7 @@ vibe: Builds responsive web apps with pixel-perfect precision.
             chroma_path=self.chroma_path,
             source_root=self.source_root,
             threshold=0.0,  # accept any match for test
-            handoff_fn=lambda t, r: {"status": "ok", "agent": r.agent_id}
+            handoff_fn=lambda t, r, c: {"status": "ok", "agent": r.agent_id}
         )
         self.scheduler = OrchestratorScheduler(self.orchestrator)
 

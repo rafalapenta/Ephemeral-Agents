@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import litellm
 
@@ -19,6 +19,24 @@ from src.router.semantic import RouteAgentResult
 from src.state.manager import StateManager
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class HandoffFn(Protocol):
+    """Standard protocol for handoff execution functions.
+    
+    All handoff implementations must accept (task, route, context).
+    """
+
+    def __call__(
+        self,
+        task: KanbanTask,
+        route: RouteAgentResult,
+        context: dict[str, Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        ...
 
 
 def _safe_record_skill_usage(**kwargs) -> None:

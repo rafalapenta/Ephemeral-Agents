@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from src.catalog.skills_engine import DirectorSkillsEngine, SkillMatchResult
 from src.database.models import Base, DirectorSkill, SkillCatalog
-from src.macro_agents.handoff import litellm_handoff
+from src.macro_agents.handoff import HandoffFn, litellm_handoff
 from src.orchestration.context import compress_context, inject_ephemeral_skill
 from src.orchestration.kanban import (
     MISSING_SKILL,
@@ -241,7 +241,7 @@ class MacroOrchestrator:
         chroma_path: Path | str | None = None,
         source_root: Path | str | None = None,
         threshold: float = 0.30,
-        handoff_fn: Any | None = litellm_handoff,
+        handoff_fn: HandoffFn | None = litellm_handoff,
         dry_run: bool = False,
     ) -> None:
         self.state = StateManager(state_dir=state_dir)
@@ -423,12 +423,7 @@ class MacroOrchestrator:
 
             # Handoff
             if self.handoff_fn is not None:
-                import inspect
-                sig = inspect.signature(self.handoff_fn)
-                if len(sig.parameters) >= 3 or any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()):
-                    handoff_result = self.handoff_fn(task, route_result, compressed)
-                else:
-                    handoff_result = self.handoff_fn(task, route_result)
+                handoff_result = self.handoff_fn(task, route_result, compressed)
             else:
                 handoff_result = {
                     "status": "simulated",

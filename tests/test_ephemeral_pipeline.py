@@ -679,3 +679,58 @@ def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypat
     assert cost_rep["cost_source"] in ("fallback_table", "default_estimate")
 
 
+def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 2: Standardized handoff_fn signature receives task, route_result, and context."""
+    from src.macro_agents.handoff import HandoffFn
+
+    received_args = {}
+
+    def custom_handoff(task: KanbanTask, route: RouteAgentResult, context: dict) -> dict:
+        received_args["task"] = task
+        received_args["route"] = route
+        received_args["context"] = context
+        return {"status": "success", "agent_id": route.agent_id, "reply": "Handled custom"}
+
+    # Verify custom_handoff matches HandoffFn protocol
+    assert isinstance(custom_handoff, HandoffFn)
+
+    db_url = setup_ephemeral_db["db_url"]
+    state_dir = setup_ephemeral_db["state_dir"]
+    source_root = setup_ephemeral_db["source_root"]
+
+    def fake_route(query, **kwargs):
+        return RouteAgentResult(
+            matched=True,
+            score=0.95,
+            agent_id="vulcan",
+            name="Vulcan",
+            macro_domain="engineering",
+            system_prompt="# Vulcan System Prompt",
+            tools=[],
+            reason="matched vulcan",
+        )
+
+    monkeypatch.setattr("src.macro_agents.orchestrator.route_agent", fake_route)
+
+    orchestrator = MacroOrchestrator(
+        state_dir=state_dir,
+        database_url=db_url,
+        source_root=source_root,
+        handoff_fn=custom_handoff,
+        dry_run=False,
+    )
+    orchestrator.board._sync_linear = False
+
+    res = orchestrator.orchestrate(
+        title="Kubernetes Bare-Metal Migrator",
+        body="Migração de cluster Kubernetes",
+    )
+
+    assert res.status == "completed"
+    assert received_args["task"].title == "Kubernetes Bare-Metal Migrator"
+    assert received_args["route"].agent_id == "vulcan"
+    assert isinstance(received_args["context"], dict)
+    assert "system_prompt" in received_args["context"]
+
+
+
