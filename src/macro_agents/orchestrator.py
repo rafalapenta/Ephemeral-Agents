@@ -211,7 +211,7 @@ class MacroOrchestrator:
         Minimum routing score to consider a match.
     handoff_fn:
         Optional callback to perform the actual domain agent dispatch.
-        Signature: ``(task: KanbanTask, route: RouteAgentResult) -> dict``.
+        Signature: ``(task: KanbanTask, route: RouteAgentResult, context: dict) -> dict``.
         If ``None``, handoff is simulated (dry-run mode).
     """
 
@@ -396,7 +396,12 @@ class MacroOrchestrator:
 
             # Handoff
             if self.handoff_fn is not None:
-                handoff_result = self.handoff_fn(task, route_result)
+                import inspect
+                sig = inspect.signature(self.handoff_fn)
+                if len(sig.parameters) >= 3 or any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()):
+                    handoff_result = self.handoff_fn(task, route_result, compressed)
+                else:
+                    handoff_result = self.handoff_fn(task, route_result)
             else:
                 handoff_result = {
                     "status": "simulated",

@@ -14,37 +14,44 @@ from src.gateway.models import resolve_model
 
 logger = logging.getLogger(__name__)
 
-def litellm_handoff(task: KanbanTask, route: RouteAgentResult) -> dict[str, Any]:
+def litellm_handoff(
+    task: KanbanTask,
+    route: RouteAgentResult,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Execute the domain agent handoff using a direct LiteLLM call.
     
     This constructs a conversation using the agent's system prompt (from the 
-    SOUL.md file) and the task context, and sends it to the configured LLM.
+    SOUL.md file and any injected ephemeral skills) and the task context,
+    and sends it to the configured LLM.
     """
     logger.info("Initiating LiteLLM handoff for task %s to agent %s", task.task_id, route.agent_id)
     
-    # 1. Compress the context to avoid sending unnecessary bloat to the LLM
-    handoff_context = {
-        "task_id": task.task_id,
-        "title": task.title,
-        "body": task.body,
-        "priority": task.priority,
-        "macro_domain": route.macro_domain,
-        "target_agent": route.agent_id,
-    }
-    compressed = compress_context(handoff_context)
-    
-    # 2. Fetch memory from Obsidian
+    # 1. Fetch memory from Obsidian
     obsidian = ObsidianMemory()
     memory_context = obsidian.get_agent_context(route.agent_id)
     
-    # 3. Build the messages payload
-    sys_prompt = route.system_prompt or "You are a helpful AI assistant."
+    # 2. Build the messages payload
+    sys_prompt = (context.get("system_prompt") if context else None) or route.system_prompt or "You are a helpful AI assistant."
     if memory_context:
         sys_prompt = f"{sys_prompt}\n\n{memory_context}"
+
+    if context:
+        user_context = {k: v for k, v in context.items() if k != "system_prompt"}
+    else:
+        handoff_context = {
+            "task_id": task.task_id,
+            "title": task.title,
+            "body": task.body,
+            "priority": task.priority,
+            "macro_domain": route.macro_domain,
+            "target_agent": route.agent_id,
+        }
+        user_context = compress_context(handoff_context)
         
     messages = [
         {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": f"Please execute the following task.\n\nContext:\n{json.dumps(compressed, indent=2)}"}
+        {"role": "user", "content": f"Please execute the following task.\n\nContext:\n{json.dumps(user_context, indent=2)}"}
     ]
     
     # 3. Resolve the per-agent model target.

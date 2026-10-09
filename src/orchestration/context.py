@@ -15,6 +15,7 @@ from typing import Any
 _ESSENTIAL_KEYS = frozenset({
     "task_id",
     "title",
+    "body",
     "status",
     "priority",
     "assignee",
@@ -26,6 +27,9 @@ _ESSENTIAL_KEYS = frozenset({
     "updated_at",
     "error",
     "result",
+    "system_prompt",
+    "ephemeral_skill",
+    "ephemeral_skill_md",
 })
 
 # Fields removed during compression (verbose/diagnostic)
@@ -39,7 +43,7 @@ _DROP_KEYS = frozenset({
     "internal_metadata",
 })
 
-# Maximum length (in chars) for any single string value after compression
+# Maximum length (in chars) for any single non-essential string value after compression
 _MAX_STRING_LEN = 2000
 
 
@@ -78,9 +82,12 @@ def _compress(
         for key, value in obj.items():
             if key in drops and key not in essentials:
                 continue
-            result[key] = _compress(
-                value, essentials=essentials, drops=drops, max_len=max_len
-            )
+            if key in essentials and isinstance(value, str):
+                result[key] = value
+            else:
+                result[key] = _compress(
+                    value, essentials=essentials, drops=drops, max_len=max_len
+                )
         return result
 
     if isinstance(obj, list):
