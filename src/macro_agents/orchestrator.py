@@ -144,6 +144,8 @@ def _post_task_telemetry(
     journal_path: Path | str = Path("data/journal.jsonl"),
 ) -> dict[str, Any]:
     """Hook pós-execução que grava métricas de execução em data/journal.jsonl."""
+    from src.governance.limits import get_cost_report, record_task_cost
+
     task_id = getattr(task, "task_id", "") or getattr(result, "task_id", "")
 
     # Director resolution
@@ -174,10 +176,22 @@ def _post_task_telemetry(
                 human_corrected = True
                 break
 
-    # Tokens estimation/retrieval
-    tokens = getattr(result, "tokens", 0) or 0
-    if not tokens and hasattr(result, "skill_match") and getattr(result.skill_match, "skill", None):
-        tokens = getattr(result.skill_match.skill, "token_budget", 0) or 0
+    # Cost report resolution
+    cost_report = {}
+    if hasattr(result, "handoff_result") and isinstance(getattr(result, "handoff_result"), dict):
+        cost_report = result.handoff_result.get("cost_report", {})
+    if not cost_report:
+        cost_report = get_cost_report(str(task_id))
+
+    tokens = cost_report.get("total_tokens", 0)
+    if not tokens:
+        tokens = getattr(result, "tokens", 0) or 0
+        if not tokens and hasattr(result, "skill_match") and getattr(result.skill_match, "skill", None):
+            tokens = getattr(result.skill_match.skill, "token_budget", 0) or 0
+
+    cost_usd = cost_report.get("total_cost_usd", 0.0)
+    ephemeral_count = cost_report.get("ephemeral_count", 0)
+    limits_hit = cost_report.get("limits_hit", [])
 
     metrics = {
         "task_id": str(task_id),
@@ -185,6 +199,10 @@ def _post_task_telemetry(
         "retries": int(retries),
         "human_corrected": bool(human_corrected),
         "tokens": int(tokens),
+        "cost_usd": float(cost_usd),
+        "ephemeral_count": int(ephemeral_count),
+        "limits_hit": list(limits_hit),
+        "cost_report": cost_report,
         "latency_ms": round(float(latency_ms), 2),
         "timestamp": time.time(),
     }
@@ -394,6 +412,15 @@ class MacroOrchestrator:
                 )
             )
 
+            # Handoff context setup with limits & board
+            from src.governance.limits import EphemeralLimits
+            limits = EphemeralLimits()
+            compressed["_limits"] = limits
+            compressed["_board"] = self.board
+            compressed["_db_url"] = self._db_url
+            compressed["_state_manager"] = self.state
+            compressed["adherence_score"] = skill_match.score if skill_match else 1.0
+
             # Handoff
             if self.handoff_fn is not None:
                 import inspect
@@ -408,6 +435,34 @@ class MacroOrchestrator:
                     "agent_id": route_result.agent_id,
                     "timestamp": time.time(),
                 }
+
+            if handoff_result.get("status") == "limit_exceeded":
+                if task.status != KanbanStatus.BLOCKED:
+                    try:
+                        self.board.transition(task.task_id, KanbanStatus.BLOCKED, actor="governance", reason="limit_exceeded")
+                    except Exception:
+                        pass
+                task.blocked_reason = "limit_exceeded"
+                self.state.apply(
+                    {
+                        "phase": "blocked",
+                        "blocked_reason": "limit_exceeded",
+                        "handoff_result": handoff_result,
+                        "target_agent": route_result.agent_id,
+                    },
+                    source="governance",
+                )
+                result.status = "blocked"
+                result.error = "limit_exceeded"
+                result.state_version = self.state.version
+                result.gates.append(
+                    GateResult(
+                        gate_id="GATE4",
+                        passed=False,
+                        message="governance limit exceeded",
+                    )
+                )
+                return result
 
             self.state.apply(
                 {
@@ -477,6 +532,11 @@ class MacroOrchestrator:
     ) -> dict[str, Any]:
         """Post-execution telemetry hook recorded in data/journal.jsonl."""
         return _post_task_telemetry(task, result, latency_ms=latency_ms, journal_path=journal_path)
+
+    def get_cost_report(self, task_id: str) -> dict[str, Any]:
+        """Query task cost, tokens, and ephemeral stats for Sterling governance."""
+        from src.governance.limits import get_cost_report
+        return get_cost_report(task_id)
 
     def on_skill_discovered(
         self,

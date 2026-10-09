@@ -120,8 +120,54 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
         target_director="vulcan",
         auto_commit=False,
     )
-    print(f"-> Hot-patch status: {patch_res.get('patched')} ({patch_res.get('director')})")
-    print(f"-> Detalhes: {patch_res.get('rule') or patch_res.get('reason')}")
+    # --- CENÁRIO D: SUBAGENTES EFÊMEROS & GOVERNANÇA (STERLING) ---
+    print("\n[CENÁRIO 4: SUBAGENTES EFÊMEROS & GOVERNANÇA - SPAWN_EPHEMERAL]")
+    from src.macro_agents.ephemeral import execute_ephemeral_task
+    from src.governance.limits import EphemeralLimits, get_cost_report
+    from src.orchestration.kanban import KanbanTask, KanbanStatus
+
+    task_parent = KanbanTask(
+        title="Deploy Contínuo e Testes E2E",
+        body="Orquestração de pipeline com execução de suíte de testes isolados",
+        assignee="vulcan",
+        macro_domain="engineering",
+    )
+    orchestrator.board.add(task_parent)
+
+    print(f"-> Tarefa Pai: [{task_parent.task_id[:8]}] {task_parent.title} (Diretor: {task_parent.assignee})")
+    print("-> [DIRETOR VULCAN] Invocando tool 'spawn_ephemeral' para skill 'k8s-baremetal-migrator'...")
+
+    limits = EphemeralLimits(max_ephemerals_per_task=5, max_cost_usd_per_task=0.50)
+    
+    eph_res = execute_ephemeral_task(
+        skill_id="k8s-baremetal-migrator",
+        subtask_title="Migrar plano de dados etcd bare-metal",
+        subtask_body="Drenar nós sequencialmente e migrar etcd distribuído",
+        expected_output="Pods e ingress validados no cluster",
+        parent_task=task_parent,
+        board=orchestrator.board,
+        database_url=DEFAULT_DB_URL,
+        director_id="vulcan",
+        limits=limits,
+    )
+
+    child_subtask_id = eph_res.get("subtask_id")
+    child_subtask = orchestrator.board.get(child_subtask_id) if child_subtask_id else None
+
+    print(f"-> [SUB-AGENTE EFÊMERO] Subtarefa Filha criada: [{child_subtask_id[:8] if child_subtask_id else 'N/A'}]")
+    print(f"-> Status da subtarefa no Kanban: {child_subtask.status.value if child_subtask else 'N/A'}")
+    print(f"-> Isolamento: Sem SOUL do diretor, sem memória Obsidian, sem histórico")
+    print(f"-> Status de execução efêmera: {eph_res.get('status')}")
+    print(f"-> Retorno ao Diretor Vulcan: {eph_res.get('output', '')[:80]}...")
+    print(f"-> Estado do subagente efêmero: DESCARTADO com sucesso.")
+
+    # Relatório de custos para o Sterling
+    cost_report = limits.to_report()
+    print("\n-> [AUDITORIA STERLING] Relatório de Governança e Custos:")
+    print(f"   * Total de Efêmeros Spawnados: {cost_report['ephemeral_count']}/{limits.max_ephemerals_per_task}")
+    print(f"   * Tokens Totais: {cost_report['total_tokens']}/{limits.max_tokens_per_task}")
+    print(f"   * Custo Total Estimado: ${cost_report['total_cost_usd']:.4f} / ${limits.max_cost_usd_per_task:.2f}")
+    print(f"   * Limites Atingidos: {cost_report['limits_hit'] or 'Nenhum (Operação Segura)'}")
 
     print("\n" + "=" * 60)
     print("DRY RUN CONCLUÍDO COM SUCESSO")

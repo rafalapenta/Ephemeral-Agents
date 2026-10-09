@@ -123,16 +123,11 @@ class KanbanBoard:
         if self.linear:
             try:
                 ready_tasks = self.linear.fetch_ready_tasks()
-                # Store them locally so we can retrieve them by ID later during transition
                 for task in ready_tasks:
                     self._tasks[task.task_id] = task
-                
-                # If using Linear, we primarily care about the READY column for the scheduler
-                return {KanbanStatus.READY.value: ready_tasks}
             except Exception as e:  # noqa: BLE001
                 logger.error(f"Failed to fetch tasks from Linear: {e}")
 
-        # Fallback local logic
         cols: dict[str, list[KanbanTask]] = {s.value: [] for s in KanbanStatus}
         for task in self._tasks.values():
             cols[task.status.value].append(task)
@@ -197,9 +192,12 @@ class KanbanBoard:
                 KanbanStatus.BLOCKED: "Canceled"
             }
             target = state_map.get(to_status, "Todo")
-            success = self.linear.update_issue_state(task_id, target)
-            if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
-                self.linear.add_comment(task_id, "Agent execution completed successfully.")
+            try:
+                success = self.linear.update_issue_state(task_id, target)
+                if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
+                    self.linear.add_comment(task_id, "Agent execution completed successfully.")
+            except Exception as e:
+                logger.warning(f"Failed to sync state to Linear for task {task_id}: {e}")
 
         return task
 
