@@ -823,5 +823,112 @@ def test_context_sanitization_removes_private_and_non_serializable_objects(setup
     assert "visible_payload_value" in all_content_str
 
 
+def test_no_circular_import_between_indexer_and_router():
+    """Test PONTO 1: Fresh import of indexer and semantic router without circular import errors."""
+    import sys
+    # Clear cached modules if any to simulate clean import
+    for mod in ["src.catalog.indexer", "src.router.semantic", "src.catalog.embeddings"]:
+        sys.modules.pop(mod, None)
+
+    import src.catalog.embeddings as embeddings_mod
+    import src.catalog.indexer as indexer_mod
+    import src.router.semantic as router_mod
+
+    assert hasattr(embeddings_mod, "DeterministicHashEmbeddingFunction")
+    assert hasattr(indexer_mod, "run_indexing")
+    assert hasattr(router_mod, "route_agent")
+
+
+def test_agency_embeddings_hash_indexes_and_routes_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 2: AGENCY_EMBEDDINGS=hash indexes and routes completely offline."""
+    from src.catalog.embeddings import get_embedding_function
+    from src.catalog.indexer import run_indexing
+    from src.router.semantic import route_agent
+
+    monkeypatch.setenv("AGENCY_EMBEDDINGS", "hash")
+
+    embed_fn = get_embedding_function()
+    assert embed_fn.backend_name == "hash"
+
+    source_root = tmp_path / "agency-agents"
+    agent_dir = source_root / "engineering"
+    agent_dir.mkdir(parents=True)
+    agent_file = agent_dir / "vulcan.md"
+    agent_file.write_text(
+        "---\nname: Vulcan\ndescription: Software engineer and DevOps specialist.\n---\n# Vulcan\n- **Role**: Software Engineering\n",
+        encoding="utf-8",
+    )
+
+    db_url = f"sqlite:///{(tmp_path / 'hash_test.db').as_posix()}"
+    chroma_path = tmp_path / "chroma_hash"
+
+    report = run_indexing(
+        source_root=source_root,
+        database_url=db_url,
+        chroma_path=chroma_path,
+        reindex=True,
+    )
+    assert report.valid == 1
+
+    # Route agent offline with hash embeddings
+    res = route_agent(
+        query="software engineering and devops",
+        database_url=db_url,
+        chroma_path=chroma_path,
+        source_root=source_root,
+    )
+    assert res.matched is True
+    assert res.agent_id == "vulcan"
+
+
+def test_local_embeddings_fallback_to_hash_when_missing(monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 2: When AGENCY_EMBEDDINGS=local but sentence-transformers is missing, fall back to hash."""
+    import builtins
+    from src.catalog.embeddings import get_embedding_function
+
+    monkeypatch.setenv("AGENCY_EMBEDDINGS", "local")
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            raise ImportError("No module named 'sentence_transformers'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    embed_fn = get_embedding_function()
+    assert embed_fn.backend_name == "hash"
+
+
+def test_embedding_backend_mismatch_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 2: Mismatch between index metadata and current router embedding produces reindex warning."""
+    import logging
+    from src.catalog.embeddings import (
+        DeterministicHashEmbeddingFunction,
+        GatewayEmbeddingFunction,
+        check_embedding_compatibility,
+        save_embedding_metadata,
+    )
+
+    chroma_path = tmp_path / "chroma_meta_test"
+    chroma_path.mkdir(parents=True)
+
+    # Index was saved with gateway embedding
+    gateway_fn = GatewayEmbeddingFunction(model="openai/mistral-embed")
+    save_embedding_metadata(chroma_path, gateway_fn)
+
+    # Current router is using hash embedding
+    hash_fn = DeterministicHashEmbeddingFunction()
+    is_compat, warn_msg = check_embedding_compatibility(chroma_path, hash_fn)
+
+    assert is_compat is False
+    assert warn_msg is not None
+    assert "reindex" in warn_msg
+    assert "gateway" in warn_msg
+    assert "hash" in warn_msg
+
+
+
 
 

@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from src.catalog.indexer import HashEmbeddingFunction
+from src.catalog.embeddings import check_embedding_compatibility, get_embedding_function
 from src.catalog.skills_engine import DirectorSkillsEngine, SkillMatchResult
 from src.database.models import Agent, AgentTool
 
@@ -119,9 +119,12 @@ def route_agent(
     database_url: str | None = None,
     chroma_path: Path | str | None = None,
     source_root: Path | str | None = None,
-    embedding_function: HashEmbeddingFunction | None = None,
+    embedding_function: Any | None = None,
     **kwargs
 ) -> RouteAgentResult:
+    import logging
+    _logger = logging.getLogger(__name__)
+
     query = query.strip()
     if not query:
         raise ValueError('query must not be empty')
@@ -132,6 +135,13 @@ def route_agent(
     c_path = Path(chroma_path) if chroma_path else DEFAULT_CHROMA_PATH
     s_root = Path(source_root) if source_root else DEFAULT_CATALOG_PATH
 
+    embedder = embedding_function or get_embedding_function()
+
+    # Check compatibility with index
+    is_compat, warn_msg = check_embedding_compatibility(c_path, embedder)
+    if not is_compat and warn_msg:
+        _logger.warning(warn_msg)
+
     # 1. ChromaDB Vector Search
     vector_scores: dict[str, float] = {}
     try:
@@ -141,7 +151,6 @@ def route_agent(
             collection = client.get_collection('agency_agents')
             count = collection.count()
             if count > 0:
-                embedder = embedding_function or HashEmbeddingFunction()
                 v_res = collection.query(
                     query_embeddings=embedder([query]),
                     n_results=min(15, count),
