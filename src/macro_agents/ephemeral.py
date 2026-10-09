@@ -209,9 +209,9 @@ def execute_ephemeral_task(
         {"role": "user", "content": user_prompt},
     ]
 
-    # Resolve model for ephemeral execution
-    assigned_director = director_id or parent_task.assignee or "vulcan"
-    resolved = resolve_model(assigned_director)
+    # Resolve model for ephemeral execution (always uses the cheapest/free ephemeral tier)
+    assigned_director = director_id or parent_task.assignee or "ephemeral"
+    resolved = resolve_model("ephemeral")
     model_name = model_override or resolved.model
 
     completion_kwargs: dict[str, Any] = {

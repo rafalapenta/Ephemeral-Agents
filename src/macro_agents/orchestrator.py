@@ -255,6 +255,13 @@ class MacroOrchestrator:
         self._chroma = Path(chroma_path) if chroma_path else None
         self._source = Path(source_root) if source_root else None
 
+        # Check LLM gateway health on initialization (non-blocking warning if offline)
+        if not dry_run and self.handoff_fn is not None:
+            from src.gateway.models import check_gateway_health
+            is_ok, msg, _ = check_gateway_health(timeout=3.0)
+            if not is_ok:
+                logger.warning(msg)
+
     def orchestrate_task(
         self,
         task: KanbanTask,

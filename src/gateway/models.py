@@ -196,14 +196,19 @@ PREMIUM_TAIL: list[ModelChoice] = [
 
 
 def _gateway_base() -> str:
-    return os.environ.get("OMNIROUTE_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    return (
+        os.environ.get("AGENCY_LLM_BASE_URL")
+        or os.environ.get("OMNIROUTE_BASE_URL")
+        or DEFAULT_BASE_URL
+    ).rstrip("/")
 
 
 def _gateway_key() -> str:
     # The gateway accepts requests without a bearer token, but sending one is
     # harmless and keeps us compatible with a locked-down deployment.
     return (
-        os.environ.get("OMNIROUTE_API_KEY")
+        os.environ.get("AGENCY_LLM_API_KEY")
+        or os.environ.get("OMNIROUTE_API_KEY")
         or os.environ.get("HERMES_CUSTOM_OMNIROUTE_API_KEY")
         or os.environ.get("HERMES_CUSTOM_OMNIROUTE_2_API_KEY")
         or ""
@@ -222,6 +227,50 @@ def _qualify(model_id: str, base: str) -> str:
     return f"openai/{model_id}"
 
 
+def check_gateway_health(
+    base_url: str | None = None,
+    api_key: str | None = None,
+    timeout: float = 3.0,
+) -> tuple[bool, str, list[str]]:
+    """Perform a fast health check on the LLM gateway.
+
+    Makes a GET request to /models with a short timeout (3.0s).
+    Does not raise exceptions on connection or timeout failure.
+
+    Returns:
+        tuple[bool, str, list[str]]: (is_available, status_message, available_models)
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = (base_url or _gateway_base()).rstrip("/")
+    models_url = f"{url}/models"
+    key = api_key if api_key is not None else _gateway_key()
+
+    req = urllib.request.Request(models_url)
+    if key:
+        req.add_header("Authorization", f"Bearer {key}")
+    req.add_header("User-Agent", "aggency-health-check/1.0")
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            if response.status == 200:
+                body = response.read().decode("utf-8")
+                data = json.loads(body)
+                models = []
+                if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                    models = [m.get("id", "") for m in data["data"] if isinstance(m, dict)]
+                elif isinstance(data, list):
+                    models = [m.get("id", "") for m in data if isinstance(m, dict)]
+                return True, f"LLM gateway operacional em {url}", models
+            return False, f"LLM gateway retornou status {response.status} em {models_url}", []
+    except Exception as exc:
+        msg = f"LLM gateway indisponível em {url}; diretores não vão responder"
+        logger.warning(msg)
+        return False, msg, []
+
+
 def resolve_model(agent_id: str | None) -> ResolvedModel:
     """Resolve the LiteLLM target for *agent_id*.
 
@@ -232,22 +281,36 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
     base = _gateway_base()
     timeout = float(os.environ.get("HANDOFF_TIMEOUT_SECONDS", DEFAULT_TIMEOUT))
 
-    # 1. Hard per-agent override wins over everything.
-    override = os.environ.get(f"AGENT_MODEL_{agent.upper()}")
-    if override:
-        choice = ModelChoice(override, "override", 0.2, 4096, "AGENT_MODEL_* env override")
-        chain = [choice]
-        source = "env-override"
+    # 1. Ephemeral subagents: always use the cheapest/free tier model
+    if agent == "ephemeral":
+        ephemeral_override = os.environ.get("AGENCY_EPHEMERAL_MODEL")
+        if ephemeral_override:
+            choice = ModelChoice(ephemeral_override, "fast", 0.2, 2048, "AGENCY_EPHEMERAL_MODEL env override")
+            chain = [choice]
+            source = "ephemeral-env"
+        else:
+            chain = [
+                ModelChoice("mistral/ministral-8b-latest", "fast", 0.2, 2048, "cheapest default model for ephemeral subagents"),
+                ModelChoice("mistral/ministral-14b-latest", "reliable", 0.2, 2048),
+            ]
+            source = "ephemeral-default"
     else:
-        chain = list(AGENT_MODELS.get(agent) or AGENT_MODELS.get("atlas", []))
-        source = "registry"
+        # 2. Hard per-agent override wins over everything.
+        override = os.environ.get(f"AGENT_MODEL_{agent.upper()}")
+        if override:
+            choice = ModelChoice(override, "override", 0.2, 4096, "AGENT_MODEL_* env override")
+            chain = [choice]
+            source = "env-override"
+        else:
+            chain = list(AGENT_MODELS.get(agent) or AGENT_MODELS.get("atlas", []))
+            source = "registry"
 
-    if not chain:
-        chain = [ModelChoice("mistral/ministral-8b-latest", "reliable", 0.2, 4096, "default")]
+        if not chain:
+            chain = [ModelChoice("mistral/ministral-8b-latest", "reliable", 0.2, 4096, "default")]
 
-    # 2. Optional tier promotion.
-    if os.environ.get("AGENT_MODEL_TIER", "reliable").lower() == "premium":
-        chain = [c for c in chain if c.tier != "fast"] + PREMIUM_TAIL
+        # 3. Optional tier promotion.
+        if os.environ.get("AGENT_MODEL_TIER", "reliable").lower() == "premium":
+            chain = [c for c in chain if c.tier != "fast"] + PREMIUM_TAIL
 
     primary, *rest = chain
     return ResolvedModel(
@@ -266,7 +329,7 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
 
 def describe_matrix() -> list[dict[str, str]]:
     """Human-readable snapshot of the configured matrix (for diagnostics/CLI)."""
-    return [
+    matrix = [
         {
             "agent": agent,
             "primary": chain[0].model_id,
@@ -276,6 +339,16 @@ def describe_matrix() -> list[dict[str, str]]:
         }
         for agent, chain in sorted(AGENT_MODELS.items())
     ]
+    # Add ephemeral default configuration
+    ephemeral_model = os.environ.get("AGENCY_EPHEMERAL_MODEL", "mistral/ministral-8b-latest")
+    matrix.append({
+        "agent": "ephemeral (subagent)",
+        "primary": ephemeral_model,
+        "tier": "fast (cheapest/free)",
+        "fallback": "mistral/ministral-14b-latest",
+        "rationale": "isolated ephemeral skills execution (max_depth=1)",
+    })
+    return matrix
 
 
 if __name__ == "__main__":  # pragma: no cover - diagnostics helper

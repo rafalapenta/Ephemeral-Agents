@@ -11,6 +11,7 @@ from pathlib import Path
 
 # Configurar ambiente para execução offline/dry-run determinística
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+os.environ.setdefault("HANDOFF_TIMEOUT_SECONDS", "2.0")
 
 # Ajustar PYTHONPATH para a raiz do repositório
 REPO_ROOT = Path(__file__).resolve().parents[1]

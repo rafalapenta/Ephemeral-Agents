@@ -929,6 +929,77 @@ def test_embedding_backend_mismatch_warning(tmp_path: Path, monkeypatch: pytest.
     assert "hash" in warn_msg
 
 
+def test_gateway_models_configurable_base_url_and_api_key(monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 3: Models registry respects AGENCY_LLM_BASE_URL and AGENCY_LLM_API_KEY with aliases."""
+    from src.gateway.models import _gateway_base, _gateway_key, resolve_model
+
+    # Custom agency env vars
+    monkeypatch.setenv("AGENCY_LLM_BASE_URL", "https://custom-gateway.openai.azure.com/v1")
+    monkeypatch.setenv("AGENCY_LLM_API_KEY", "secret-test-key-12345")
+
+    assert _gateway_base() == "https://custom-gateway.openai.azure.com/v1"
+    assert _gateway_key() == "secret-test-key-12345"
+
+    res = resolve_model("vulcan")
+    assert res.api_base == "https://custom-gateway.openai.azure.com/v1"
+    assert res.api_key == "secret-test-key-12345"
+
+    # Alias fallback
+    monkeypatch.delenv("AGENCY_LLM_BASE_URL")
+    monkeypatch.delenv("AGENCY_LLM_API_KEY")
+    monkeypatch.setenv("OMNIROUTE_BASE_URL", "http://omniroute.local:8080/v1")
+    monkeypatch.setenv("OMNIROUTE_API_KEY", "omniroute-secret")
+
+    assert _gateway_base() == "http://omniroute.local:8080/v1"
+    assert _gateway_key() == "omniroute-secret"
+
+
+def test_ephemeral_model_resolution_and_override(monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 3: Ephemerals use cheapest tier, configurable by AGENCY_EPHEMERAL_MODEL."""
+    from src.gateway.models import resolve_model
+
+    monkeypatch.delenv("AGENCY_EPHEMERAL_MODEL", raising=False)
+    default_res = resolve_model("ephemeral")
+    assert default_res.tier == "fast"
+    assert "ministral-8b" in default_res.model
+
+    monkeypatch.setenv("AGENCY_EPHEMERAL_MODEL", "openrouter/free-model-v1")
+    override_res = resolve_model("ephemeral")
+    assert override_res.tier == "fast"
+    assert "openrouter/free-model-v1" in override_res.model
+
+
+def test_check_gateway_health_offline(monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 3: Gateway health check handles offline gateway gracefully with clear warning message."""
+    from src.gateway.models import check_gateway_health
+
+    # Point to an unreachable port / offline host with short timeout
+    is_ok, msg, models = check_gateway_health(base_url="http://127.0.0.1:59999/v1", timeout=0.5)
+    assert is_ok is False
+    assert "indisponível" in msg or "indisponivel" in msg or "127.0.0.1:59999" in msg
+    assert models == []
+
+
+def test_doctor_command_runs_cleanly(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
+    """Test PONTO 3: 'aggency doctor' diagnostic tool runs completely without unhandled exceptions."""
+    from src.cli.doctor import run_doctor
+
+    monkeypatch.setenv("AGENCY_EMBEDDINGS", "hash")
+    monkeypatch.setenv("AGENCY_LLM_API_KEY", "test-secret-key-abcdef")
+
+    ret = run_doctor()
+    captured = capsys.readouterr()
+
+    assert ret in (0, 2)
+    assert "AGency System Doctor" in captured.out
+    assert "Embeddings Backend" in captured.out
+    assert "Model Matrix & Director Tiers" in captured.out
+    # Ensure raw secret key is NEVER printed in plain text
+    assert "test-secret-key-abcdef" not in captured.out
+    assert "masked" in captured.out
+
+
+
 
 
 

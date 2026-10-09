@@ -175,8 +175,10 @@ def save_embedding_metadata(chroma_path: Path | str, embedding_fn: Any) -> None:
     meta_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def check_embedding_compatibility(chroma_path: Path | str, embedding_fn: Any) -> tuple[bool, str | None]:
+def check_embedding_compatibility(chroma_path: Path | str, embedding_fn: Any | None = None) -> tuple[bool, str | None]:
     """Verify whether current embedding function matches index metadata."""
+    if embedding_fn is None:
+        embedding_fn = get_embedding_function()
     path = Path(chroma_path)
     meta_file = path / METADATA_FILENAME
     if not meta_file.exists():
