@@ -12,6 +12,7 @@
 
 # --- Databases ---
 *.db
+data/*.db
 *.sqlite
 *.sqlite3
 *.db-journal
@@ -19,12 +20,12 @@ chroma_data/
 venv/
 .venv/
 env/
-env/
 
-# --- Logs ---
+# --- Logs & Local Session ---
 *.log
 logs/
 .log
+Session Summary & Context Log.md
 
 # --- Python ---
 __pycache__/

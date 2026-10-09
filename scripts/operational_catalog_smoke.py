@@ -10,8 +10,14 @@ from sqlalchemy.orm import Session
 from src.database.models import Agent, AgentTool, Tool
 from src.router.semantic import route_agent
 
-ROOT = Path(r'C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency')
-SOURCE = Path(r'C:\Users\RAFAEL\Documents\R!\Obsidian Memory\raw\agency-agents')
+import os
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+source_env = os.environ.get("AGENCY_AGENTS_SOURCE")
+if not source_env:
+    sys.exit("Error: AGENCY_AGENTS_SOURCE environment variable is not set. Please set it to the source directory of agency-agents.")
+SOURCE = Path(source_env)
 DB_PATH = ROOT / 'agency_agents.db'
 DB_URL = f'sqlite:///{DB_PATH.as_posix()}'
 CHROMA = ROOT / 'chroma'
