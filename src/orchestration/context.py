@@ -15,6 +15,7 @@ from typing import Any
 _ESSENTIAL_KEYS = frozenset({
     "task_id",
     "title",
+    "body",
     "status",
     "priority",
     "assignee",
@@ -26,6 +27,9 @@ _ESSENTIAL_KEYS = frozenset({
     "updated_at",
     "error",
     "result",
+    "system_prompt",
+    "ephemeral_skill",
+    "ephemeral_skill_md",
 })
 
 # Fields removed during compression (verbose/diagnostic)
@@ -39,7 +43,7 @@ _DROP_KEYS = frozenset({
     "internal_metadata",
 })
 
-# Maximum length (in chars) for any single string value after compression
+# Maximum length (in chars) for any single non-essential string value after compression
 _MAX_STRING_LEN = 2000
 
 
@@ -78,9 +82,12 @@ def _compress(
         for key, value in obj.items():
             if key in drops and key not in essentials:
                 continue
-            result[key] = _compress(
-                value, essentials=essentials, drops=drops, max_len=max_len
-            )
+            if key in ("system_prompt", "ephemeral_skill_md") and isinstance(value, str):
+                result[key] = value
+            else:
+                result[key] = _compress(
+                    value, essentials=essentials, drops=drops, max_len=max_len
+                )
         return result
 
     if isinstance(obj, list):
@@ -94,3 +101,80 @@ def _compress(
 
     # Scalars pass through
     return copy.deepcopy(obj) if isinstance(obj, (dict, list)) else obj
+
+
+def inject_ephemeral_skill(
+    base_payload: dict[str, Any],
+    skill: Any,
+) -> dict[str, Any]:
+    """Inject an ephemeral skill into the orchestration payload cleanly within token budget.
+
+    Parameters
+    ----------
+    base_payload:
+        The existing context/payload dict.
+    skill:
+        A SkillCatalog model or object with id, name, token_budget, and content_md.
+
+    Returns
+    -------
+    A new dict containing the original payload plus the attached skill markdown and metadata.
+    """
+    payload = copy.deepcopy(base_payload)
+
+    # Heuristic: 1 token ~ 4 characters
+    token_budget = getattr(skill, "token_budget", 800) or 800
+    max_chars = token_budget * 4
+
+    content_md = getattr(skill, "content_md", "") or ""
+    if len(content_md) > max_chars:
+        content_md = content_md[:max_chars].rstrip() + "\n... [truncated to fit token_budget]"
+
+    skill_id = getattr(skill, "id", "")
+    skill_name = getattr(skill, "name", skill_id)
+
+    payload["ephemeral_skill"] = {
+        "id": skill_id,
+        "name": skill_name,
+        "token_budget": token_budget,
+        "content_md": content_md,
+    }
+
+    # Append to system_prompt cleanly if available, or set it
+    if payload.get("system_prompt"):
+        section = f"\n\n---\n## Ephemeral Skill: {skill_name} ({skill_id})\n{content_md}\n---\n"
+        payload["system_prompt"] = str(payload["system_prompt"]) + section
+    else:
+        payload["system_prompt"] = f"## Ephemeral Skill: {skill_name} ({skill_id})\n{content_md}"
+
+    payload["ephemeral_skill_md"] = content_md
+    return payload
+
+
+def sanitize_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Sanitize context dictionary by removing private keys and non-JSON serializable objects.
+    
+    - Strips any key starting with '_' (e.g. '_state_manager', '_db_url', '_limits')
+    - Drops any value that fails json.dumps serialization (e.g. class instances, functions, modules)
+    """
+    import json
+    import logging
+    _log = logging.getLogger(__name__)
+
+    if not context or not isinstance(context, dict):
+        return {}
+
+    sanitized: dict[str, Any] = {}
+    for k, v in context.items():
+        if str(k).startswith("_"):
+            continue
+        try:
+            # Verify JSON serializability
+            json.dumps(v)
+            sanitized[k] = v
+        except (TypeError, OverflowError, ValueError) as err:
+            _log.debug("sanitize_context dropped non-serializable key '%s': %s", k, err)
+            continue
+
+    return sanitized
+

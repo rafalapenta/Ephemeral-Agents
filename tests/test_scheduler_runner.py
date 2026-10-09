@@ -9,9 +9,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.catalog.indexer import run_indexing
+from src.database.models import Base, DirectorSkill, SkillCatalog
 from src.macro_agents.orchestrator import MacroOrchestrator
+from src.orchestration.kanban import KanbanStatus, KanbanTask
 from src.scheduler.runner import OrchestratorScheduler
-from src.orchestration.kanban import KanbanTask, KanbanStatus
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 class TestOrchestratorScheduler(unittest.TestCase):
@@ -46,14 +49,38 @@ vibe: Builds responsive web apps with pixel-perfect precision.
             reindex=True,
         )
 
+        # Seed matching director skill for fast-path completion
+        engine = create_engine(self.db_url)
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            skill = SkillCatalog(
+                id="react-builder",
+                name="Frontend Developer Task",
+                description="Frontend Developer Task Build React component",
+                content_md="# Frontend Developer Task\nBuild React component with pixel-perfect precision.",
+                token_budget=500,
+            )
+            session.add(skill)
+            session.flush()
+            session.add(
+                DirectorSkill(
+                    director_id="engineering-frontend-developer",
+                    skill_id="react-builder",
+                    is_core=True,
+                    load_priority=1,
+                )
+            )
+            session.commit()
+
         self.orchestrator = MacroOrchestrator(
             state_dir=self.tmp / "state",
             database_url=self.db_url,
             chroma_path=self.chroma_path,
             source_root=self.source_root,
             threshold=0.0,  # accept any match for test
-            handoff_fn=lambda t, r: {"status": "ok", "agent": r.agent_id}
+            handoff_fn=lambda t, r, c, runtime=None: {"status": "ok", "agent": r.agent_id},
         )
+        self.orchestrator.board._sync_linear = False
         self.scheduler = OrchestratorScheduler(self.orchestrator)
 
     def tearDown(self):

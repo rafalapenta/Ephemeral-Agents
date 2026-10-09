@@ -112,13 +112,20 @@ The returned `OrchestrationResult` contains the matched agent, all gate verdicts
 
 ## Key modules
 
-### `src/catalog/indexer.py`
+### `src/catalog/indexer.py` and `src/catalog/embeddings.py`
 
-Discovers agent definition files (SOUL.md) under a source root, parses their YAML frontmatter and body to extract `agent_id`, `macro_domain`, `squad`, `name`, `trigger_hooks`, and `system_prompt_path`, then writes the results to both a SQLite relational store (via SQLAlchemy) and a ChromaDB vector collection. Embeddings are produced by `HashEmbeddingFunction`, a deterministic Blake2b-based function that requires no external API. The indexer also maintains an FTS5 virtual table for lexical search and expands trigger hooks with a configurable synonym map. On first run it detects a missing database and treats the run as an implicit full reindex; subsequent runs require the explicit `--reindex` flag to avoid accidental overwrites.
+Discovers agent definition files (SOUL.md) under a source root, parses their YAML frontmatter and body to extract `agent_id`, `macro_domain`, `squad`, `name`, `trigger_hooks`, and `system_prompt_path`, then writes the results to both a SQLite relational store (via SQLAlchemy) and a ChromaDB vector collection.
+
+Embeddings are configured via `AGENCY_EMBEDDINGS` (`local` | `gateway` | `hash`):
+- **`local` (default)**: Uses `sentence-transformers` with `paraphrase-multilingual-MiniLM-L12-v2` for high-quality local multilingual semantic search without external API costs (install via `pip install "aggency[local-embeddings]"`).
+- **`gateway`**: Uses OmniRoute or OpenAI-compatible embedding API (`openai/mistral-embed`).
+- **`hash`**: Deterministic Blake2b hashing with zero dependencies, serving as offline fallback and for unit tests.
+
+The indexer saves embedding backend metadata alongside Chroma vectors. On first run it detects a missing database and initialises automatically; subsequent runs require the explicit `--reindex` flag.
 
 ### `src/router/semantic.py`
 
-Implements `route_agent()`, the core routing function. It runs two searches concurrently: a ChromaDB approximate nearest-neighbour query using the same `HashEmbeddingFunction` used at index time, and a SQLite FTS5 match against agent names, domains, squads, and trigger hooks. Scores from both sources are fused with a hybrid formula that favours candidates appearing in both result sets. Ties are broken deterministically by a fixed domain priority order (`engineering` > `operations` > `business` > `research` > `governance`). If the best candidate score falls below the configured threshold the function returns a `RouteAgentResult` with `matched=False`. On a successful match it loads the full agent record from SQLite, reads the system prompt from disk, and assembles the authorised tool list from the `agent_tools` join table.
+Implements `route_agent()`, the core routing function. It runs two searches concurrently: a ChromaDB approximate nearest-neighbour query using the configured embedding function (`AGENCY_EMBEDDINGS`), and a SQLite FTS5 match against agent names, domains, squads, and trigger hooks. If the current embedding backend or model differs from the metadata used to index the catalog, the router logs a compatibility warning requesting an `aggency-index --reindex`. Scores from both sources are fused with a hybrid formula that favours candidates appearing in both result sets. Ties are broken deterministically by a fixed domain priority order (`engineering` > `operations` > `business` > `research` > `governance`). If the best candidate score falls below the configured threshold the function returns a `RouteAgentResult` with `matched=False`. On a successful match it loads the full agent record from SQLite, reads the system prompt from disk, and assembles the authorised tool list from the `agent_tools` join table.
 
 ### `src/macro_agents/orchestrator.py`
 
@@ -144,6 +151,10 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 
 | Variable | Default | Description |
 |---|---|---|
+| `AGENCY_EMBEDDINGS` | `local` | Embedding backend: `local` (sentence-transformers), `gateway` (OmniRoute/OpenAI), `hash` (blake2b) |
+| `AGENCY_LLM_BASE_URL` | `http://localhost:20128/v1` | OpenAI-compatible gateway base URL (alias: `OMNIROUTE_BASE_URL`) |
+| `AGENCY_LLM_API_KEY` | `""` | Gateway bearer token / API key (alias: `OMNIROUTE_API_KEY`) |
+| `AGENCY_EPHEMERAL_MODEL`| `mistral/ministral-8b-latest` | Default model for ephemeral subagents |
 | `DATABASE_URL` | `sqlite:///./data/agency_agents.db` | SQLAlchemy DB URL for the agent catalog |
 | `CHROMA_PERSIST_DIR` | `./chroma_data` | ChromaDB persistence directory |
 | `CATALOG_PATH` | `./src/bots_config` | Root path scanned for agent SOUL.md files |

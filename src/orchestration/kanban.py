@@ -11,9 +11,9 @@ Now integrated with Linear GraphQL API for cloud state synchronization.
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
-import logging
 from enum import Enum
 from typing import Any
 
@@ -70,6 +70,9 @@ class AuditEntry(BaseModel):
     reason: str = ""
 
 
+MISSING_SKILL = "MISSING_SKILL"
+
+
 class KanbanTask(BaseModel):
     """A single task on the Kanban board."""
 
@@ -83,6 +86,8 @@ class KanbanTask(BaseModel):
     assignee: str = ""
     macro_domain: str = ""
     block_reason: str = ""
+    blocked_reason: str | None = None
+    parent_task_id: str | None = None
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     audit_trail: list[AuditEntry] = Field(default_factory=list)
@@ -95,12 +100,15 @@ class KanbanBoard:
     the StateManager lock when mutating shared board state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sync_linear: bool = True) -> None:
         self._tasks: dict[str, KanbanTask] = {}
         self._linear = None
+        self._sync_linear = sync_linear
 
     @property
     def linear(self):
+        if not self._sync_linear:
+            return None
         if self._linear is None:
             from src.orchestration.linear_client import get_linear_client
             self._linear = get_linear_client()
@@ -115,16 +123,11 @@ class KanbanBoard:
         if self.linear:
             try:
                 ready_tasks = self.linear.fetch_ready_tasks()
-                # Store them locally so we can retrieve them by ID later during transition
                 for task in ready_tasks:
                     self._tasks[task.task_id] = task
-                
-                # If using Linear, we primarily care about the READY column for the scheduler
-                return {KanbanStatus.READY.value: ready_tasks}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f"Failed to fetch tasks from Linear: {e}")
 
-        # Fallback local logic
         cols: dict[str, list[KanbanTask]] = {s.value: [] for s in KanbanStatus}
         for task in self._tasks.values():
             cols[task.status.value].append(task)
@@ -173,8 +176,10 @@ class KanbanBoard:
 
         if to_status == KanbanStatus.BLOCKED:
             task.block_reason = reason
+            task.blocked_reason = reason
         elif from_status == KanbanStatus.BLOCKED:
             task.block_reason = ""
+            task.blocked_reason = None
 
         # Update Linear if configured
         if self.linear:
@@ -187,9 +192,12 @@ class KanbanBoard:
                 KanbanStatus.BLOCKED: "Canceled"
             }
             target = state_map.get(to_status, "Todo")
-            success = self.linear.update_issue_state(task_id, target)
-            if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
-                self.linear.add_comment(task_id, "Agent execution completed successfully.")
+            try:
+                success = self.linear.update_issue_state(task_id, target)
+                if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
+                    self.linear.add_comment(task_id, "Agent execution completed successfully.")
+            except Exception as e:
+                logger.warning(f"Failed to sync state to Linear for task {task_id}: {e}")
 
         return task
 

@@ -12,14 +12,16 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+import os
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import Session, sessionmaker, selectinload
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from src.catalog.indexer import HashEmbeddingFunction
+from src.catalog.embeddings import check_embedding_compatibility, get_embedding_function
+from src.catalog.skills_engine import DirectorSkillsEngine, SkillMatchResult
 from src.database.models import Agent, AgentTool
-
-import os
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{_REPO_ROOT / 'agency_agents.db'}")
@@ -74,6 +76,7 @@ class RouteAgentResult(BaseModel):
     squad: str | None = None
     system_prompt: str | None = None
     tools: list[AuthorizedTool] = Field(default_factory=list)
+    skill_match: dict[str, Any] | None = None
     reason: str
 
 
@@ -116,9 +119,12 @@ def route_agent(
     database_url: str | None = None,
     chroma_path: Path | str | None = None,
     source_root: Path | str | None = None,
-    embedding_function: HashEmbeddingFunction | None = None,
+    embedding_function: Any | None = None,
     **kwargs
 ) -> RouteAgentResult:
+    import logging
+    _logger = logging.getLogger(__name__)
+
     query = query.strip()
     if not query:
         raise ValueError('query must not be empty')
@@ -129,6 +135,13 @@ def route_agent(
     c_path = Path(chroma_path) if chroma_path else DEFAULT_CHROMA_PATH
     s_root = Path(source_root) if source_root else DEFAULT_CATALOG_PATH
 
+    embedder = embedding_function or get_embedding_function()
+
+    # Check compatibility with index
+    is_compat, warn_msg = check_embedding_compatibility(c_path, embedder)
+    if not is_compat and warn_msg:
+        _logger.warning(warn_msg)
+
     # 1. ChromaDB Vector Search
     vector_scores: dict[str, float] = {}
     try:
@@ -138,7 +151,6 @@ def route_agent(
             collection = client.get_collection('agency_agents')
             count = collection.count()
             if count > 0:
-                embedder = embedding_function or HashEmbeddingFunction()
                 v_res = collection.query(
                     query_embeddings=embedder([query]),
                     n_results=min(15, count),
@@ -235,6 +247,25 @@ def route_agent(
                 reason='agent found in index but inactive or missing in database',
             )
 
+        # Resolve director skill if applicable
+        skill_match_dict: dict[str, Any] | None = None
+        try:
+            skills_engine = DirectorSkillsEngine(
+                db_session=session,
+                embedder=embedding_function,
+                threshold=0.72,
+            )
+            match_res = skills_engine.resolve_skill(agent.agent_id, query)
+            skill_match_dict = {
+                "matched": match_res.matched,
+                "score": match_res.score,
+                "candidate_id": match_res.candidate_id,
+                "skill_name": match_res.skill.name if match_res.skill else None,
+                "reason": match_res.reason,
+            }
+        except (AttributeError, RuntimeError, ValueError, KeyError, TypeError):
+            skill_match_dict = None
+
         return RouteAgentResult(
             matched=True,
             score=round(best_score, 4),
@@ -244,7 +275,40 @@ def route_agent(
             squad=agent.squad,
             system_prompt=_read_prompt(s_root, agent.system_prompt_path),
             tools=_authorized_tools(agent),
+            skill_match=skill_match_dict,
             reason='matched candidate above threshold',
         )
     finally:
         session.close()
+
+
+def resolve_director_skill(
+    director_id: str,
+    task_prompt: str,
+    threshold: float = 0.72,
+    *,
+    database_url: str | None = None,
+    chroma_path: Path | str | None = None,
+    embedding_function: Any = None,
+) -> SkillMatchResult:
+    """Resolve authorized skill for a director with department isolation and thresholding."""
+    db_url = database_url or DEFAULT_DB_URL
+    engine = create_engine(db_url)
+    c_path = Path(chroma_path) if chroma_path else DEFAULT_CHROMA_PATH
+
+    chroma_client = None
+    try:
+        import chromadb
+        chroma_client = chromadb.PersistentClient(path=str(c_path))
+    except (ImportError, OSError, RuntimeError, ValueError):
+        chroma_client = None
+
+    with Session(engine) as session:
+        engine_instance = DirectorSkillsEngine(
+            db_session=session,
+            chroma_client=chroma_client,
+            embedder=embedding_function,
+            threshold=threshold,
+        )
+        return engine_instance.resolve_skill(director_id, task_prompt)
+
