@@ -606,3 +606,76 @@ def test_etapa4_limit_exceeded_ephemerals_and_tokens(setup_ephemeral_db, monkeyp
     assert rep["ephemeral_count"] == 1
     assert rep["limit_exceeded"] is True
 
+
+def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+    """Test PONTO 1: When completion_cost is 0, estimate_cost falls back to table, cost > 0, and limits trigger."""
+    from src.gateway.models import estimate_cost
+
+    # 1. Test unit behavior of estimate_cost
+    cost, source = estimate_cost("mistral/codestral-latest", prompt_tokens=1000, completion_tokens=1000)
+    assert cost > 0.0
+    assert source == "fallback_table"
+
+    unknown_cost, unknown_source = estimate_cost("nonexistent-custom-model", prompt_tokens=1000, completion_tokens=1000)
+    assert unknown_cost > 0.0
+    assert unknown_source == "default_estimate"
+
+    # 2. Integration test with mocked completion_cost = 0
+    monkeypatch.setattr("litellm.completion_cost", lambda *args, **kwargs: 0.0)
+
+    db_url = setup_ephemeral_db["db_url"]
+    board = KanbanBoard(sync_linear=False)
+
+    task = KanbanTask(
+        title="Test Cost Limit Exceeded",
+        body="Execute subtask under cost limits",
+        priority="high",
+    )
+    board.add(task)
+
+    # Set very small cost limit: $0.000001
+    limits = EphemeralLimits(max_cost_usd_per_task=0.000001)
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "Subtask output content"
+    mock_choice.message.tool_calls = None
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage.model_dump.return_value = {"prompt_tokens": 500, "completion_tokens": 500, "total_tokens": 1000}
+
+    monkeypatch.setattr("litellm.completion", lambda *args, **kwargs: mock_resp)
+
+    # First ephemeral executes and records fallback cost, surpassing max_cost_usd_per_task
+    res1 = execute_ephemeral_task(
+        skill_id="playwright-runner",
+        subtask_title="Subtask 1",
+        subtask_body="Body 1",
+        expected_output="Out 1",
+        parent_task=task,
+        board=board,
+        database_url=db_url,
+        limits=limits,
+    )
+    assert res1["status"] == "success"
+    assert res1["cost_usd"] > 0.0
+
+    # Second call must be blocked due to cost limit exceeded
+    res2 = execute_ephemeral_task(
+        skill_id="playwright-runner",
+        subtask_title="Subtask 2",
+        subtask_body="Body 2",
+        expected_output="Out 2",
+        parent_task=task,
+        board=board,
+        database_url=db_url,
+        limits=limits,
+    )
+    assert res2["status"] == "limit_exceeded"
+    assert "limit_exceeded" in res2["error"]
+
+    cost_rep = limits.to_report()
+    assert cost_rep["limit_exceeded"] is True
+    assert cost_rep["total_cost_usd"] > 0.0
+    assert cost_rep["cost_source"] in ("fallback_table", "default_estimate")
+
+

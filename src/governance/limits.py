@@ -43,6 +43,7 @@ class EphemeralLimits:
     ephemeral_count: int = 0
     tool_iterations: int = 0
     limits_hit: list[str] = field(default_factory=list)
+    cost_source: str = "litellm"
 
     def can_iterate(self) -> tuple[bool, str | None]:
         """Check if another tool iteration is permitted before calling LLM."""
@@ -82,10 +83,12 @@ class EphemeralLimits:
         tokens: int = 0,
         cost_usd: float = 0.0,
         is_ephemeral: bool = False,
+        cost_source: str = "litellm",
     ) -> None:
         """Record token and cost consumption of a single LLM call."""
         self.current_tokens += int(tokens)
         self.current_cost_usd += float(cost_usd)
+        self.cost_source = cost_source
         if is_ephemeral:
             self.ephemeral_count += 1
         else:
@@ -104,6 +107,7 @@ class EphemeralLimits:
             "tool_iterations": self.tool_iterations,
             "limits_hit": list(self.limits_hit),
             "limit_exceeded": len(self.limits_hit) > 0,
+            "cost_source": self.cost_source,
         }
 
 
@@ -145,4 +149,6 @@ def get_cost_report(task_id: str, journal_path: Path | str = Path("data/journal.
         "tool_iterations": 0,
         "limits_hit": [],
         "limit_exceeded": False,
+        "cost_source": "litellm",
     }
+

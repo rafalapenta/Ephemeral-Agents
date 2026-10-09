@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from src.database.models import SkillCatalog
-from src.gateway.models import resolve_model
+from src.gateway.models import estimate_cost, resolve_model
 from src.orchestration.kanban import (
     MISSING_SKILL,
     KanbanBoard,
@@ -252,14 +252,20 @@ def execute_ephemeral_task(
         total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
 
         # Calculate cost
-        cost_usd = 0.0
-        try:
-            cost_usd = float(litellm.completion_cost(completion_response=response) or 0.0)
-        except Exception:
-            cost_usd = 0.0
+        cost_usd, cost_source = estimate_cost(
+            model=used_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            completion_response=response,
+        )
 
         if limits is not None:
-            limits.record_call(tokens=total_tokens, cost_usd=cost_usd, is_ephemeral=True)
+            limits.record_call(
+                tokens=total_tokens,
+                cost_usd=cost_usd,
+                is_ephemeral=True,
+                cost_source=cost_source,
+            )
 
         # Transition subtask to DONE
         if board is not None:

@@ -37,6 +37,83 @@ DEFAULT_BASE_URL = "http://localhost:20128/v1"
 DEFAULT_TIMEOUT = 120.0
 _DEFAULT_AGENT = "general"
 
+# ── Fallback pricing table (per 1,000 tokens in USD) ────────────
+# EXAMPLE reference pricing table for cost estimation when litellm.completion_cost
+# is unavailable or unmapped on gateway endpoints. Clearly marked as example pricing.
+EXAMPLE_FALLBACK_PRICING: dict[str, dict[str, float]] = {
+    "mistral/ministral-8b-latest": {"input_usd_per_1k": 0.0001, "output_usd_per_1k": 0.0001},
+    "mistral/ministral-14b-latest": {"input_usd_per_1k": 0.0002, "output_usd_per_1k": 0.0002},
+    "mistral/codestral-latest": {"input_usd_per_1k": 0.0003, "output_usd_per_1k": 0.0009},
+    "mistral/mistral-code-latest": {"input_usd_per_1k": 0.0003, "output_usd_per_1k": 0.0009},
+    "mistral/magistral-medium-latest": {"input_usd_per_1k": 0.0020, "output_usd_per_1k": 0.0060},
+    "mistral/mistral-medium-latest": {"input_usd_per_1k": 0.0020, "output_usd_per_1k": 0.0060},
+    "gpt-4o-mini": {"input_usd_per_1k": 0.00015, "output_usd_per_1k": 0.0006},
+    "gpt-4o": {"input_usd_per_1k": 0.0025, "output_usd_per_1k": 0.0100},
+}
+
+# Conservative default prices if model is not found in fallback table
+DEFAULT_FALLBACK_INPUT_USD_PER_1K = float(os.getenv("DEFAULT_FALLBACK_INPUT_USD_PER_1K", "0.0015"))
+DEFAULT_FALLBACK_OUTPUT_USD_PER_1K = float(os.getenv("DEFAULT_FALLBACK_OUTPUT_USD_PER_1K", "0.0060"))
+
+_WARNED_UNKNOWN_MODELS: set[str] = set()
+
+
+def estimate_cost(
+    model: str | None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    completion_response: Any | None = None,
+) -> tuple[float, str]:
+    """Estimate token cost in USD with progressive fallbacks.
+    
+    Order of precedence:
+    1. litellm.completion_cost()
+    2. Fallback pricing table (EXAMPLE_FALLBACK_PRICING or env overrides)
+    3. Conservative default estimate (logs warning once per model)
+    
+    Returns:
+        tuple[float, str]: (calculated_cost_usd, cost_source)
+        where cost_source is one of: "litellm", "fallback_table", "default_estimate"
+    """
+    import litellm
+
+    # 1. Try LiteLLM completion_cost first
+    if completion_response is not None:
+        try:
+            litellm_cost = float(litellm.completion_cost(completion_response=completion_response) or 0.0)
+            if litellm_cost > 0.0:
+                return round(litellm_cost, 6), "litellm"
+        except Exception:
+            pass
+
+    # 2. Try LiteLLM cost_per_token or completion_cost by model if model name provided
+    clean_model = (model or "").strip()
+    if clean_model.startswith("openai/"):
+        clean_model = clean_model[len("openai/"):]
+
+    # Check fallback table
+    pricing = EXAMPLE_FALLBACK_PRICING.get(clean_model) or EXAMPLE_FALLBACK_PRICING.get(model or "")
+    if pricing is not None:
+        in_rate = float(pricing.get("input_usd_per_1k", DEFAULT_FALLBACK_INPUT_USD_PER_1K))
+        out_rate = float(pricing.get("output_usd_per_1k", DEFAULT_FALLBACK_OUTPUT_USD_PER_1K))
+        cost = (prompt_tokens / 1000.0) * in_rate + (completion_tokens / 1000.0) * out_rate
+        return round(cost, 6), "fallback_table"
+
+    # 3. Conservative default estimate
+    model_key = model or clean_model or "unknown"
+    if model_key not in _WARNED_UNKNOWN_MODELS:
+        logger.warning(
+            "Model '%s' not recognized in LiteLLM cost map or fallback pricing table; using conservative default estimate ($%.4f/$%.4f per 1k).",
+            model_key,
+            DEFAULT_FALLBACK_INPUT_USD_PER_1K,
+            DEFAULT_FALLBACK_OUTPUT_USD_PER_1K,
+        )
+        _WARNED_UNKNOWN_MODELS.add(model_key)
+
+    cost = (prompt_tokens / 1000.0) * DEFAULT_FALLBACK_INPUT_USD_PER_1K + (completion_tokens / 1000.0) * DEFAULT_FALLBACK_OUTPUT_USD_PER_1K
+    return round(cost, 6), "default_estimate"
+
+
 
 @dataclass(frozen=True)
 class ModelChoice:

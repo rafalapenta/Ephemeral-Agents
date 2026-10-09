@@ -9,7 +9,7 @@ from typing import Any
 import litellm
 
 from src.database.usage import record_skill_usage
-from src.gateway.models import resolve_model
+from src.gateway.models import estimate_cost, resolve_model
 from src.governance.limits import EphemeralLimits, record_task_cost
 from src.macro_agents.ephemeral import SPAWN_EPHEMERAL_TOOL, execute_ephemeral_task
 from src.memory.obsidian import ObsidianMemory
@@ -212,13 +212,19 @@ def litellm_handoff(
             c_tok = usage_data.get("completion_tokens", 0)
             t_tok = usage_data.get("total_tokens", p_tok + c_tok)
 
-            call_cost = 0.0
-            try:
-                call_cost = float(litellm.completion_cost(completion_response=response) or 0.0)
-            except Exception:
-                call_cost = 0.0
+            call_cost, cost_source = estimate_cost(
+                model=used_model,
+                prompt_tokens=p_tok,
+                completion_tokens=c_tok,
+                completion_response=response,
+            )
 
-            active_limits.record_call(tokens=t_tok, cost_usd=call_cost, is_ephemeral=False)
+            active_limits.record_call(
+                tokens=t_tok,
+                cost_usd=call_cost,
+                is_ephemeral=False,
+                cost_source=cost_source,
+            )
             total_prompt_tokens += p_tok
             total_completion_tokens += c_tok
             total_cost_usd += call_cost
