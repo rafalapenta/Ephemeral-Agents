@@ -106,3 +106,5 @@ data/journal.jsonl
 
 # === CONFIGURAÇÕES LOCAIS / MCP ===
 data/.mcp.json
+
+ai-job-search/

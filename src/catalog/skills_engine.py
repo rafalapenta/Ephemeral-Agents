@@ -47,7 +47,10 @@ class DefaultSkillsEmbedder:
                     tokens.extend(w[i : i + 3] for i in range(len(w) - 2))
 
             for token in tokens:
-                idx = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % self.dimensions
+                idx = (
+                    int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16)
+                    % self.dimensions
+                )
                 vec[idx] += 1.0
 
             norm = math.sqrt(sum(x * x for x in vec))
@@ -67,6 +70,77 @@ def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     return max(0.0, min(1.0, float(dot / (norm1 * norm2))))
 
 
+def _compute_adjusted_score(
+    db_session: Session,
+    skill_id: str,
+    director_id: str,
+    similarity: float,
+) -> float:
+    """Calculate final routing score with Bayesian smoothed success rate adjustment.
+
+    score_final = similarity * (1 - w) + smoothed_success_rate * w
+    where w = ROUTER_SUCCESS_WEIGHT (default 0.3).
+    Bayesian smoothing: prior 0.5 with 5 runs weight: (successes + 2.5) / (total_runs + 5).
+    If total_runs < 3, uses only similarity.
+    """
+    import os
+
+    from sqlalchemy import case, func, select
+
+    from src.database.models import SkillUsage, SkillUsageDaily
+
+    total_runs = 0
+    total_successes = 0
+
+    try:
+        # 1. Query SkillUsage
+        d_stmt = select(
+            func.count(SkillUsage.id),
+            func.sum(case((func.upper(SkillUsage.outcome) == "SUCCESS", 1), else_=0)),
+        ).where(
+            SkillUsage.skill_id == skill_id,
+            SkillUsage.director_id == director_id,
+        )
+        d_row = db_session.execute(d_stmt).one()
+        d_runs = d_row[0] or 0
+        d_succ = d_row[1] or 0
+        total_runs += int(d_runs)
+        total_successes += int(d_succ)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError):
+        pass
+
+    try:
+        # 2. Query SkillUsageDaily
+        day_stmt = select(
+            func.sum(SkillUsageDaily.runs),
+            func.sum(SkillUsageDaily.successes),
+        ).where(
+            SkillUsageDaily.skill_id == skill_id,
+            SkillUsageDaily.director_id == director_id,
+        )
+        day_row = db_session.execute(day_stmt).one()
+        day_runs = day_row[0] or 0
+        day_succ = day_row[1] or 0
+        total_runs += int(day_runs)
+        total_successes += int(day_succ)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError):
+        pass
+
+    if total_runs < 3:
+        return float(similarity)
+
+    w_env = os.getenv("ROUTER_SUCCESS_WEIGHT", "0.3")
+    try:
+        w = float(w_env)
+        w = max(0.0, min(1.0, w))
+    except ValueError:
+        w = 0.3
+
+    smoothed_success_rate = (total_successes + 2.5) / (total_runs + 5.0)
+    score_final = similarity * (1.0 - w) + smoothed_success_rate * w
+    return max(0.0, min(1.0, float(score_final)))
+
+
 class DirectorSkillsEngine:
     """Scoped skills engine providing department isolation and adherence calculation."""
 
@@ -82,12 +156,18 @@ class DirectorSkillsEngine:
         self.threshold = threshold
         self.collection_name = collection_name
 
-        if chroma_client is not None and callable(chroma_client) and not hasattr(chroma_client, "get_collection"):
+        if (
+            chroma_client is not None
+            and callable(chroma_client)
+            and not hasattr(chroma_client, "get_collection")
+        ):
             self.embedder = chroma_client
             self.chroma_client = None
         else:
             self.chroma_client = chroma_client
-            self.embedder = embedder if embedder is not None else DefaultSkillsEmbedder()
+            self.embedder = (
+                embedder if embedder is not None else DefaultSkillsEmbedder()
+            )
 
     def _get_or_create_collection(self) -> Any:
         if self.chroma_client is None:
@@ -132,54 +212,23 @@ class DirectorSkillsEngine:
                 reason=f"No authorized skills found for director '{director_id}'",
             )
 
-        skill_map = {s.id: s for s in authorized_skills}
         best_candidate_id: str | None = None
         best_score: float = -1.0
         best_skill: SkillCatalog | None = None
 
-        collection = self._get_or_create_collection()
-        if collection is not None:
-            try:
-                docs = [f"{s.name}. {s.description}\n{s.content_md}" for s in authorized_skills]
-                ids = [s.id for s in authorized_skills]
-                metadatas = [{"skill_id": s.id, "director_id": director_id} for s in authorized_skills]
-                embeddings = self.embedder(docs)
-                collection.upsert(ids=ids, documents=docs, metadatas=metadatas, embeddings=embeddings)
+        query_vec = self.embedder([prompt])[0]
+        docs = [f"{s.name}. {s.description}\n{s.content_md}" for s in authorized_skills]
+        doc_vecs = self.embedder(docs)
 
-                where_filter = (
-                    {"skill_id": ids[0]}
-                    if len(ids) == 1
-                    else {"skill_id": {"$in": ids}}
-                )
-                query_emb = self.embedder([prompt])
-                query_res = collection.query(
-                    query_embeddings=query_emb,
-                    n_results=min(len(ids), 10),
-                    where=where_filter,
-                    include=["distances", "metadatas"],
-                )
-                retrieved_ids = query_res.get("ids", [[]])[0]
-                distances = query_res.get("distances", [[]])[0]
-                if retrieved_ids and distances:
-                    best_candidate_id = retrieved_ids[0]
-                    best_score = max(0.0, min(1.0, 1.0 - float(distances[0])))
-                    best_skill = skill_map.get(best_candidate_id)
-            except (AttributeError, RuntimeError, ValueError, KeyError, TypeError):
-                best_candidate_id = None
-                best_score = -1.0
-                best_skill = None
-
-        if best_score < 0.0:
-            query_vec = self.embedder([prompt])[0]
-            docs = [f"{s.name}. {s.description}\n{s.content_md}" for s in authorized_skills]
-            doc_vecs = self.embedder(docs)
-
-            for skill, doc_vec in zip(authorized_skills, doc_vecs, strict=False):
-                sim = _cosine_similarity(query_vec, doc_vec)
-                if sim > best_score:
-                    best_score = sim
-                    best_candidate_id = skill.id
-                    best_skill = skill
+        for skill, doc_vec in zip(authorized_skills, doc_vecs, strict=False):
+            raw_sim = _cosine_similarity(query_vec, doc_vec)
+            final_score = _compute_adjusted_score(
+                self.db_session, skill.id, director_id, raw_sim
+            )
+            if final_score > best_score:
+                best_score = final_score
+                best_candidate_id = skill.id
+                best_skill = skill
 
         best_score = max(0.0, best_score)
         if best_score >= self.threshold and best_skill is not None:

@@ -13,9 +13,9 @@ Lifecycle:
 4. Transition subtask to DONE (or BLOCKED on error), return output to director,
    and discard all ephemeral state.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any
@@ -65,7 +65,12 @@ SPAWN_EPHEMERAL_TOOL: dict[str, Any] = {
                     "description": "Description of the expected output format and deliverables.",
                 },
             },
-            "required": ["skill_id", "subtask_title", "subtask_body", "expected_output"],
+            "required": [
+                "skill_id",
+                "subtask_title",
+                "subtask_body",
+                "expected_output",
+            ],
         },
     },
 }
@@ -88,7 +93,11 @@ def execute_ephemeral_task(
 ) -> dict[str, Any]:
     """Execute a single ephemeral subtask in complete isolation."""
     start_time = time.time()
-    logger.info("Spawning ephemeral agent for skill '%s' (parent=%s)", skill_id, parent_task.task_id)
+    logger.info(
+        "Spawning ephemeral agent for skill '%s' (parent=%s)",
+        skill_id,
+        parent_task.task_id,
+    )
 
     # 1. Create child subtask on Kanban
     subtask = KanbanTask(
@@ -102,9 +111,19 @@ def execute_ephemeral_task(
     if board is not None:
         board.add(subtask)
         if subtask.status == KanbanStatus.TODO:
-            board.transition(subtask.task_id, KanbanStatus.READY, actor="director", reason="spawned ephemeral")
+            board.transition(
+                subtask.task_id,
+                KanbanStatus.READY,
+                actor="director",
+                reason="spawned ephemeral",
+            )
         if subtask.status == KanbanStatus.READY:
-            board.transition(subtask.task_id, KanbanStatus.IN_PROGRESS, actor="director", reason="ephemeral executing")
+            board.transition(
+                subtask.task_id,
+                KanbanStatus.IN_PROGRESS,
+                actor="director",
+                reason="ephemeral executing",
+            )
 
     # 2. Check limits if tracker/limits is passed
     if limits is not None:
@@ -112,10 +131,17 @@ def execute_ephemeral_task(
         if not can_spawn:
             logger.warning("Ephemeral spawn limit reached: %s", limit_reason)
             if board is not None:
-                board.transition(subtask.task_id, KanbanStatus.BLOCKED, actor="governance", reason="limit_exceeded")
+                board.transition(
+                    subtask.task_id,
+                    KanbanStatus.BLOCKED,
+                    actor="governance",
+                    reason="limit_exceeded",
+                )
                 subtask.blocked_reason = "limit_exceeded"
-            
-            error_output = f"limit_exceeded: Ephemeral execution aborted ({limit_reason})."
+
+            error_output = (
+                f"limit_exceeded: Ephemeral execution aborted ({limit_reason})."
+            )
             if usage_recorder:
                 usage_recorder(
                     skill_id=skill_id,
@@ -143,18 +169,29 @@ def execute_ephemeral_task(
     skill: SkillCatalog | None = None
 
     if db_session is not None:
-        skill = db_session.scalar(select(SkillCatalog).where(SkillCatalog.id == skill_id))
+        skill = db_session.scalar(
+            select(SkillCatalog).where(SkillCatalog.id == skill_id)
+        )
     else:
         engine = create_engine(db_url)
         with Session(engine) as session:
-            skill = session.scalar(select(SkillCatalog).where(SkillCatalog.id == skill_id))
+            skill = session.scalar(
+                select(SkillCatalog).where(SkillCatalog.id == skill_id)
+            )
 
     if skill is None:
-        logger.warning("Skill '%s' not found in catalog during ephemeral execution", skill_id)
+        logger.warning(
+            "Skill '%s' not found in catalog during ephemeral execution", skill_id
+        )
         if board is not None:
-            board.transition(subtask.task_id, KanbanStatus.BLOCKED, actor="orchestrator", reason=MISSING_SKILL)
+            board.transition(
+                subtask.task_id,
+                KanbanStatus.BLOCKED,
+                actor="orchestrator",
+                reason=MISSING_SKILL,
+            )
             subtask.blocked_reason = MISSING_SKILL
-            
+
             # Create Lyra escalation subtask
             lyra_subtask = KanbanTask(
                 title=f"Pesquisar no skills.sh especificação homologada para: {subtask_title}",
@@ -227,7 +264,11 @@ def execute_ephemeral_task(
     # Ephemerals NEVER receive tools (max_depth=1)
     try:
         call_start = time.time()
-        candidates = [model_name, *resolved.fallbacks] if model_name == resolved.model else [model_name]
+        candidates = (
+            [model_name, *resolved.fallbacks]
+            if model_name == resolved.model
+            else [model_name]
+        )
         response = None
         used_model = model_name
         last_error = None
@@ -239,7 +280,9 @@ def execute_ephemeral_task(
                 break
             except Exception as attempt_err:  # noqa: BLE001
                 last_error = attempt_err
-                logger.warning("Ephemeral model attempt failed with %s: %s", candidate, attempt_err)
+                logger.warning(
+                    "Ephemeral model attempt failed with %s: %s", candidate, attempt_err
+                )
 
         if response is None:
             raise last_error or RuntimeError("Ephemeral completion failed: no response")
@@ -284,11 +327,12 @@ def execute_ephemeral_task(
                 task_id=subtask.task_id,
                 parent_task_id=parent_task.task_id,
                 is_ephemeral=True,
-                outcome="success",
+                outcome="SUCCESS",
                 model=used_model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 cost_usd=cost_usd,
+                cost_source=cost_source,
                 duration_ms=duration_ms,
                 note=note,
             )
@@ -304,8 +348,10 @@ def execute_ephemeral_task(
             "duration_ms": duration_ms,
         }
 
-    except Exception as exc:
-        logger.error("Ephemeral execution failed for subtask %s: %s", subtask.task_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Ephemeral execution failed for subtask %s: %s", subtask.task_id, exc
+        )
         if board is not None:
             try:
                 board.transition(
@@ -314,7 +360,7 @@ def execute_ephemeral_task(
                     actor="ephemeral",
                     reason=f"execution failure: {exc}",
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             subtask.blocked_reason = str(exc)
 
@@ -326,11 +372,12 @@ def execute_ephemeral_task(
                 task_id=subtask.task_id,
                 parent_task_id=parent_task.task_id,
                 is_ephemeral=True,
-                outcome="failure",
+                outcome="FAILURE",
                 model=model_name,
                 prompt_tokens=0,
                 completion_tokens=0,
                 cost_usd=0.0,
+                cost_source="fallback_table",
                 duration_ms=duration_ms,
                 note=f"Ephemeral error: {exc}"[:280],
             )

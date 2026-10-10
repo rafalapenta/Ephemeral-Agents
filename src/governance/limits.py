@@ -1,4 +1,5 @@
 """Governance limits and cost tracking for Ephemeral Agents."""
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,7 @@ _TASK_COST_REPORTS: dict[str, dict[str, Any]] = {}
 @dataclass
 class EphemeralLimits:
     """Configurable execution and cost limits for task orchestration.
-    
+
     Defaults are loaded from environment variables when available.
     """
 
@@ -34,7 +35,9 @@ class EphemeralLimits:
         default_factory=lambda: int(os.getenv("EPHEMERAL_MAX_TOKENS_PER_TASK", "20000"))
     )
     max_cost_usd_per_task: float = field(
-        default_factory=lambda: float(os.getenv("EPHEMERAL_MAX_COST_USD_PER_TASK", "0.50"))
+        default_factory=lambda: float(
+            os.getenv("EPHEMERAL_MAX_COST_USD_PER_TASK", "0.50")
+        )
     )
 
     # Runtime accumulation per task
@@ -116,9 +119,11 @@ def record_task_cost(task_id: str, report: dict[str, Any]) -> None:
     _TASK_COST_REPORTS[task_id] = report
 
 
-def get_cost_report(task_id: str, journal_path: Path | str = Path("data/journal.jsonl")) -> dict[str, Any]:
+def get_cost_report(
+    task_id: str, journal_path: Path | str = Path("data/journal.jsonl")
+) -> dict[str, Any]:
     """Retrieve cost and token consumption report for Sterling governance.
-    
+
     Checks memory cache first, then falls back to querying data/journal.jsonl.
     """
     if task_id in _TASK_COST_REPORTS:
@@ -134,11 +139,16 @@ def get_cost_report(task_id: str, journal_path: Path | str = Path("data/journal.
                     if not line:
                         continue
                     entry = json.loads(line)
-                    if entry.get("task_id") == task_id or entry.get("patch", {}).get("task_id") == task_id:
-                        cost_report = entry.get("cost_report") or entry.get("patch", {}).get("cost_report")
+                    if (
+                        entry.get("task_id") == task_id
+                        or entry.get("patch", {}).get("task_id") == task_id
+                    ):
+                        cost_report = entry.get("cost_report") or entry.get(
+                            "patch", {}
+                        ).get("cost_report")
                         if cost_report:
                             return cost_report
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to parse journal for task cost report: %s", exc)
 
     return {
@@ -152,3 +162,23 @@ def get_cost_report(task_id: str, journal_path: Path | str = Path("data/journal.
         "cost_source": "litellm",
     }
 
+
+def get_sterling_cost_report(
+    period_days: int | None = None,
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    """Compile Sterling executive governance cost report, including per-skill cost breakdown."""
+    from src.database.usage import cost_by_skill
+
+    skill_costs = cost_by_skill(period_days=period_days, database_url=database_url)
+    total_cost = sum(item["total_cost_usd"] for item in skill_costs.values())
+    total_tokens = sum(item["total_tokens"] for item in skill_costs.values())
+    total_runs = sum(item["runs"] for item in skill_costs.values())
+
+    return {
+        "period_days": period_days,
+        "total_cost_usd": round(total_cost, 6),
+        "total_tokens": total_tokens,
+        "total_runs": total_runs,
+        "skills": skill_costs,
+    }

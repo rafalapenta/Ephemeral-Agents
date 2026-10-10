@@ -1,4 +1,5 @@
 """LiteLLM Handoff module with Ephemeral subagent tool-calling loop."""
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,7 @@ class HandoffRuntime:
 @runtime_checkable
 class HandoffFn(Protocol):
     """Standard protocol for handoff execution functions.
-    
+
     All handoff implementations must accept (task, route, context, runtime).
     """
 
@@ -48,8 +49,7 @@ class HandoffFn(Protocol):
         runtime: HandoffRuntime | None = None,
         *args: Any,
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 def _safe_record_skill_usage(**kwargs) -> None:
@@ -57,7 +57,6 @@ def _safe_record_skill_usage(**kwargs) -> None:
         record_skill_usage(**kwargs)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Non-fatal failure recording skill usage: %s", exc)
-
 
 
 def litellm_handoff(
@@ -73,20 +72,26 @@ def litellm_handoff(
     tools_enabled: bool = True,
 ) -> dict[str, Any]:
     """Execute the domain agent handoff using LiteLLM with tool-calling loop.
-    
+
     This constructs a conversation using the agent's system prompt (from SOUL.md
     and any injected ephemeral skills) and task context. Directors receive the
     `spawn_ephemeral` tool, allowing multi-turn orchestration with isolated subagents.
     """
     start_time = time.time()
-    logger.info("Initiating LiteLLM handoff for task %s to agent %s", task.task_id, route.agent_id)
+    logger.info(
+        "Initiating LiteLLM handoff for task %s to agent %s",
+        task.task_id,
+        route.agent_id,
+    )
 
     # Extract helper services strictly from runtime or kwargs, never from context
     active_board = (runtime.board if runtime else None) or board
     db_url = (runtime.db_url if runtime else None) or database_url
     active_limits = (runtime.limits if runtime else None) or limits or EphemeralLimits()
     active_state = (runtime.state_manager if runtime else None) or state_manager
-    adherence = (runtime.adherence_score if runtime else None) or (context.get("adherence_score") if context else 1.0)
+    adherence = (runtime.adherence_score if runtime else None) or (
+        context.get("adherence_score") if context else 1.0
+    )
 
     # 1. Fetch memory from Obsidian
     obsidian = ObsidianMemory()
@@ -103,10 +108,7 @@ def litellm_handoff(
 
     if context:
         sanitized = sanitize_context(context)
-        user_context = {
-            k: v for k, v in sanitized.items()
-            if k != "system_prompt"
-        }
+        user_context = {k: v for k, v in sanitized.items() if k != "system_prompt"}
     else:
         handoff_context = {
             "task_id": task.task_id,
@@ -163,7 +165,9 @@ def litellm_handoff(
             # Check limits before next iteration
             can_iterate, limit_reason = active_limits.can_iterate()
             if not can_iterate:
-                logger.warning("Governance limit hit for task %s: %s", task.task_id, limit_reason)
+                logger.warning(
+                    "Governance limit hit for task %s: %s", task.task_id, limit_reason
+                )
                 if active_board is not None:
                     try:
                         active_board.transition(
@@ -172,11 +176,11 @@ def litellm_handoff(
                             actor="governance",
                             reason="limit_exceeded",
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
                         pass
                     task.blocked_reason = "limit_exceeded"
 
-                # Record skill usage with limit_exceeded
+                # Record skill usage with LIMIT_EXCEEDED
                 skill_id = (
                     context.get("ephemeral_skill", {}).get("id")
                     if context and isinstance(context.get("ephemeral_skill"), dict)
@@ -188,12 +192,14 @@ def litellm_handoff(
                     skill_id=skill_id,
                     is_ephemeral=False,
                     adherence_score=adherence,
-                    outcome="limit_exceeded",
+                    outcome="LIMIT_EXCEEDED",
                     gates_passed=False,
+                    gates_failed=["LIMIT_EXCEEDED"],
                     model=used_model,
                     prompt_tokens=total_prompt_tokens,
                     completion_tokens=total_completion_tokens,
                     cost_usd=total_cost_usd,
+                    cost_source=active_limits.cost_source,
                     duration_ms=(time.time() - start_time) * 1000.0,
                     note=f"Task halted: {limit_reason}"[:280],
                     state_manager=active_state,
@@ -225,7 +231,10 @@ def litellm_handoff(
                     )
                     used_model = candidate
                     if index > 0:
-                        logger.warning("Primary model unavailable; served by fallback %s", candidate)
+                        logger.warning(
+                            "Primary model unavailable; served by fallback %s",
+                            candidate,
+                        )
                     break
                 except Exception as attempt_error:  # noqa: BLE001
                     last_error = attempt_error
@@ -295,7 +304,7 @@ def litellm_handoff(
                     tool_calls_executed += 1
                     try:
                         args = json.loads(tc.function.arguments)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         args = {}
 
                     def _usage_sink(**kwargs):
@@ -317,12 +326,14 @@ def litellm_handoff(
                         limits=active_limits,
                         usage_recorder=_usage_sink,
                     )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "name": "spawn_ephemeral",
-                        "content": eph_res.get("output", ""),
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": "spawn_ephemeral",
+                            "content": eph_res.get("output", ""),
+                        }
+                    )
 
         duration = time.time() - start_time
         cost_report = active_limits.to_report()
@@ -343,14 +354,18 @@ def litellm_handoff(
             skill_id=skill_id,
             is_ephemeral=False,
             adherence_score=adherence,
-            outcome="success",
+            outcome="SUCCESS",
             gates_passed=True,
+            gates_failed=[],
             model=used_model,
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_completion_tokens,
             cost_usd=total_cost_usd,
+            cost_source=active_limits.cost_source,
             duration_ms=duration * 1000.0,
-            note=f"Director execution completed ({tool_calls_executed} ephemerals)"[:280],
+            note=f"Director execution completed ({tool_calls_executed} ephemerals)"[
+                :280
+            ],
             state_manager=active_state,
             database_url=db_url,
         )
@@ -371,7 +386,7 @@ def litellm_handoff(
             "timestamp": time.time(),
         }
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("LiteLLM handoff failed: %s", exc)
         duration = time.time() - start_time
         cost_report = active_limits.to_report()
@@ -388,12 +403,14 @@ def litellm_handoff(
             skill_id=skill_id,
             is_ephemeral=False,
             adherence_score=adherence,
-            outcome="failure",
+            outcome="FAILURE",
             gates_passed=False,
+            gates_failed=["HANDOFF_ERROR"],
             model=used_model,
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_completion_tokens,
             cost_usd=total_cost_usd,
+            cost_source=active_limits.cost_source,
             duration_ms=duration * 1000.0,
             note=f"Director failure: {exc}"[:280],
             state_manager=active_state,

@@ -1,4 +1,5 @@
 """Relational catalog models, schemas, usage tracking and contracts."""
+
 from src.database.models import (
     Agent,
     AgentTool,
@@ -6,6 +7,7 @@ from src.database.models import (
     DirectorSkill,
     SkillCatalog,
     SkillUsage,
+    SkillUsageDaily,
     Tool,
 )
 from src.database.schemas import (
@@ -20,7 +22,13 @@ from src.database.schemas import (
     ToolCreate,
     ToolType,
 )
-from src.database.usage import prune_skill_usage, record_skill_usage
+from src.database.usage import (
+    consolidate_skill_usage,
+    cost_by_skill,
+    prune_skill_usage,
+    record_skill_usage,
+    sanitize_note,
+)
 
 __all__ = [
     "Agent",
@@ -36,10 +44,14 @@ __all__ = [
     "SkillRead",
     "SkillUsage",
     "SkillUsageCreate",
+    "SkillUsageDaily",
     "SkillUsageRead",
     "Tool",
     "ToolCreate",
     "ToolType",
+    "consolidate_skill_usage",
+    "cost_by_skill",
     "prune_skill_usage",
     "record_skill_usage",
+    "sanitize_note",
 ]

@@ -4,10 +4,12 @@ Distills execution logs of successful complex tasks into standard SKILL.md
 specifications and registers them in the SQLite `skills_catalog` with
 `source="distilled"`.
 """
+
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -199,3 +201,164 @@ def distill_task_to_skill(
         session.commit()
 
     return content_md
+
+
+@dataclass
+class SkillImprovementProposal:
+    """Proposal to refine or fix a skill based on concrete telemetry evidence."""
+
+    skill_id: str
+    director_id: str
+    failure_count: int
+    evidence_usage_ids: list[str]
+    reason: str
+    proposed_guidance: str
+    failed_gate: str | None = None
+    common_note_pattern: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "skill_id": self.skill_id,
+            "director_id": self.director_id,
+            "failure_count": self.failure_count,
+            "evidence_usage_ids": self.evidence_usage_ids,
+            "reason": self.reason,
+            "proposed_guidance": self.proposed_guidance,
+            "failed_gate": self.failed_gate,
+            "common_note_pattern": self.common_note_pattern,
+        }
+
+
+def propose_skill_improvements(
+    *,
+    db_url: str | None = None,
+    session: Session | None = None,
+    lookback_days: int = 14,
+    min_failures: int | None = None,
+) -> list[SkillImprovementProposal]:
+    """Propose skill changes based on recurring failures or rejected quality gates.
+
+    Rules:
+    - Only proposes when a skill has >= DISTILL_MIN_FAILURES (default 3) in the last
+      14 days, with the same gate failing or similar failure notes.
+    - Returns an empty list if there is no sufficient evidence.
+    - Proposals strictly cite the SkillUsage.id values as evidence.
+    """
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    from src.database.models import SkillUsage
+
+    min_fails = (
+        min_failures
+        if min_failures is not None
+        else int(os.getenv("DISTILL_MIN_FAILURES", "3"))
+    )
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+
+    def _analyze(sess: Session) -> list[SkillImprovementProposal]:
+        all_usages = list(sess.scalars(select(SkillUsage)).all())
+        recent_failures: list[SkillUsage] = []
+
+        for u in all_usages:
+            u_created = u.created_at
+            if u_created is not None:
+                if u_created.tzinfo is None:
+                    u_created = u_created.replace(tzinfo=UTC)
+                if u_created >= cutoff:
+                    is_failed = (
+                        str(u.outcome).upper()
+                        in ("FAILURE", "ESCALATED", "MISSING_SKILL", "LIMIT_EXCEEDED")
+                        or not u.gates_passed
+                        or (u.gates_failed and len(u.gates_failed) > 0)
+                    )
+                    if is_failed and u.skill_id and u.skill_id != "unassigned":
+                        recent_failures.append(u)
+
+        if not recent_failures:
+            return []
+
+        # Group by skill_id
+        grouped: dict[str, list[SkillUsage]] = {}
+        for u in recent_failures:
+            grouped.setdefault(u.skill_id, []).append(u)
+
+        proposals: list[SkillImprovementProposal] = []
+
+        for skill_id, usages in grouped.items():
+            if len(usages) < min_fails:
+                continue
+
+            director_id = usages[0].director_id or "unknown"
+
+            # 1. Check for recurring gate failure
+            gate_to_ids: dict[str, list[str]] = {}
+            for u in usages:
+                gates = u.gates_failed or []
+                if not gates and not u.gates_passed:
+                    gates = ["QUALITY_GATE_REJECTED"]
+                for g in gates:
+                    gate_to_ids.setdefault(g, []).append(u.id)
+
+            gate_proposal_created = False
+            for g, ids in gate_to_ids.items():
+                if len(ids) >= min_fails:
+                    proposals.append(
+                        SkillImprovementProposal(
+                            skill_id=skill_id,
+                            director_id=director_id,
+                            failure_count=len(ids),
+                            evidence_usage_ids=list(dict.fromkeys(ids)),
+                            reason=f"Gate '{g}' consistently failed across {len(ids)} executions in the last {lookback_days} days",
+                            proposed_guidance=f"Update skill '{skill_id}' pre-conditions and verification steps to satisfy quality gate '{g}'.",
+                            failed_gate=g,
+                        )
+                    )
+                    gate_proposal_created = True
+
+            # 2. Check for similar notes / failure keywords
+            if not gate_proposal_created:
+                # Tokenize notes into keywords (len >= 4)
+                word_to_ids: dict[str, list[str]] = {}
+                for u in usages:
+                    words = set(
+                        re.findall(r"[a-zA-Z0-9_-]{4,}", (u.note or "").lower())
+                    )
+                    for w in words:
+                        if w not in (
+                            "with",
+                            "from",
+                            "that",
+                            "this",
+                            "task",
+                            "error",
+                            "failed",
+                            "failure",
+                            "skill",
+                        ):
+                            word_to_ids.setdefault(w, []).append(u.id)
+
+                for keyword, ids in word_to_ids.items():
+                    if len(ids) >= min_fails:
+                        proposals.append(
+                            SkillImprovementProposal(
+                                skill_id=skill_id,
+                                director_id=director_id,
+                                failure_count=len(ids),
+                                evidence_usage_ids=list(dict.fromkeys(ids)),
+                                reason=f"Recurring failure pattern '{keyword}' detected across {len(ids)} executions in the last {lookback_days} days",
+                                proposed_guidance=f"Refactor procedure and steps in skill '{skill_id}' to address root cause '{keyword}'.",
+                                common_note_pattern=keyword,
+                            )
+                        )
+                        break
+
+        return proposals
+
+    if session is not None:
+        return _analyze(session)
+
+    db_target = db_url or DEFAULT_DB_URL
+    engine = create_engine(db_target)
+    with Session(engine) as sess:
+        return _analyze(sess)
