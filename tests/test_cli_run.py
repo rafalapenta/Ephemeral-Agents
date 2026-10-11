@@ -22,7 +22,7 @@ def test_dry_run_end_to_end_creates_card_usage_and_run_file(
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     runs_dir = tmp_path / "runs"
 
-    task_text = "Criar endpoint de health check em FastAPI com testes unitarios"
+    task_text = "Execução autônoma de suíte de testes unitários com pytest runner"
     exit_code = run_cli(
         [task_text, "--dry-run", "--director", "cto"], runs_dir=runs_dir
     )
@@ -64,7 +64,13 @@ def test_dry_run_json_output(
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     runs_dir = tmp_path / "runs"
     exit_code = run_cli(
-        ["Planejamento de arquitetura de microsservicos", "--dry-run", "--json"],
+        [
+            "Execução autônoma de suíte de testes unitários com pytest runner",
+            "--dry-run",
+            "--json",
+            "--director",
+            "cto",
+        ],
         runs_dir=runs_dir,
     )
     assert exit_code == 0
@@ -136,7 +142,11 @@ def test_rate_limit_429_retries_fallbacks_and_escalates(
         rate_err = Exception("Rate limit exceeded: 429 Too Many Requests")
         with patch("src.macro_agents.handoff.litellm.completion", side_effect=rate_err):
             exit_code = run_cli(
-                ["Executar deploy urgente", "--director", "cto"],
+                [
+                    "Execução autônoma de suíte de testes unitários com pytest runner",
+                    "--director",
+                    "cto",
+                ],
                 runs_dir=runs_dir,
             )
             assert exit_code == 1
@@ -148,3 +158,49 @@ def test_rate_limit_429_retries_fallbacks_and_escalates(
             assert len(run_files) == 1
             content = run_files[0].read_text(encoding="utf-8")
             assert 'outcome: "ESCALATED"' in content
+
+
+def test_marketing_task_cannot_resolve_to_agentmail_or_pytest_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+):
+    """Marketing task must not force-match agentmail or pytest-runner; result must be MISSING_SKILL."""
+    from src.macro_agents.orchestrator import MacroOrchestrator
+    from src.orchestration.kanban import MISSING_SKILL
+
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    runs_dir = tmp_path / "runs"
+
+    task_prompt = "3 ganchos de post para lançar um serviço de agentes para PMEs"
+
+    # 1. Orchestrator unit evaluation
+    orchestrator = MacroOrchestrator(dry_run=True)
+    res = orchestrator.orchestrate(title=task_prompt, body=task_prompt, assignee="cmo")
+
+    assert res.status == "blocked"
+    assert res.error == MISSING_SKILL
+    assert res.resolved_skill_id is None
+    assert res.resolved_skill_id != "agentmail"
+    assert res.resolved_skill_id != "pytest-runner"
+    assert res.skill_match is not None
+    assert res.skill_match.matched is False
+
+    # 2. CLI execution evaluation
+    exit_code = run_cli(
+        [task_prompt, "--director", "cmo", "--dry-run", "--json"],
+        runs_dir=runs_dir,
+    )
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["outcome"] == "MISSING_SKILL"
+    assert data["skill"] is None
+    assert data["skill"] != "agentmail"
+    assert data["skill"] != "pytest-runner"
+
+    # 3. Output markdown verification
+    run_files = list(runs_dir.glob("*.md"))
+    assert len(run_files) >= 1
+    content = run_files[-1].read_text(encoding="utf-8")
+    assert 'outcome: "MISSING_SKILL"' in content
+    assert 'skill: "none"' in content

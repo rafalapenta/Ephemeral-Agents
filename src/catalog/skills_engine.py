@@ -141,6 +141,27 @@ def _compute_adjusted_score(
     return max(0.0, min(1.0, float(score_final)))
 
 
+DEFAULT_SKILL_THRESHOLD = 0.72
+
+
+def get_skill_min_score() -> float:
+    """Retrieve skill minimum score threshold from environment.
+
+    Checks AGENCY_SKILL_MIN_SCORE first, then AGENCY_SKILL_THRESHOLD,
+    defaulting to DEFAULT_SKILL_THRESHOLD (0.72).
+    """
+    import os
+
+    val = os.getenv(
+        "AGENCY_SKILL_MIN_SCORE",
+        os.getenv("AGENCY_SKILL_THRESHOLD", str(DEFAULT_SKILL_THRESHOLD)),
+    )
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return DEFAULT_SKILL_THRESHOLD
+
+
 class DirectorSkillsEngine:
     """Scoped skills engine providing department isolation and adherence calculation."""
 
@@ -149,11 +170,11 @@ class DirectorSkillsEngine:
         db_session: Session,
         chroma_client: Any = None,
         embedder: Any = None,
-        threshold: float = 0.72,
+        threshold: float | None = None,
         collection_name: str = "skills_catalog",
     ) -> None:
         self.db_session = db_session
-        self.threshold = threshold
+        self.threshold = threshold if threshold is not None else get_skill_min_score()
         self.collection_name = collection_name
 
         if (

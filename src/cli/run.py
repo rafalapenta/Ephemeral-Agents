@@ -215,7 +215,6 @@ def run_cli(args: list[str], runs_dir: Path | str = "state_data/runs") -> int:
     start_time = time.time()
     orchestrator = MacroOrchestrator(
         dry_run=dry_run,
-        fallback_to_candidate=True,
     )
 
     assignee_arg = director_req if director_req != "auto" else ""
@@ -261,7 +260,10 @@ def run_cli(args: list[str], runs_dir: Path | str = "state_data/runs") -> int:
         )
         exit_code = 1
     elif res.status == "blocked":
-        outcome = "BLOCKED"
+        if res.error == "MISSING_SKILL" or res.blocked_reason == "MISSING_SKILL":
+            outcome = "MISSING_SKILL"
+        else:
+            outcome = "BLOCKED"
         reply_text = res.blocked_reason or res.error or "Tarefa bloqueada no Kanban."
         exit_code = 1
     else:

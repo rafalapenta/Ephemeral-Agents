@@ -78,10 +78,8 @@ class OrchestrationResult:
 
     @property
     def resolved_skill_id(self) -> str | None:
-        if self.skill_match and self.skill_match.skill:
+        if self.skill_match and self.skill_match.matched and self.skill_match.skill:
             return self.skill_match.skill.id
-        if self.skill_match:
-            return self.skill_match.candidate_id
         return None
 
     @property
@@ -264,10 +262,10 @@ class MacroOrchestrator:
         self.dry_run = dry_run
         self.board = KanbanBoard(sync_linear=not dry_run)
         self.threshold = threshold
+        from src.catalog.skills_engine import get_skill_min_score
+
         self.skill_threshold = (
-            skill_threshold
-            if skill_threshold is not None
-            else float(os.getenv("AGENCY_SKILL_THRESHOLD", "0.72"))
+            skill_threshold if skill_threshold is not None else get_skill_min_score()
         )
         self.fallback_to_candidate = fallback_to_candidate
         if dry_run and handoff_fn is litellm_handoff:
@@ -504,24 +502,6 @@ class MacroOrchestrator:
                     threshold=self.skill_threshold,
                 )
                 skill_match = skills_engine.resolve_skill(director_id, task_description)
-                if (
-                    not skill_match.matched
-                    and self.fallback_to_candidate
-                    and skill_match.candidate_id
-                ):
-                    cand_skill = session.scalar(
-                        select(SkillCatalog).where(
-                            SkillCatalog.id == skill_match.candidate_id
-                        )
-                    )
-                    if cand_skill:
-                        skill_match = SkillMatchResult(
-                            matched=True,
-                            score=skill_match.score,
-                            skill=cand_skill,
-                            candidate_id=skill_match.candidate_id,
-                            reason=f"fallback candidate skill: {skill_match.candidate_id}",
-                        )
             result.skill_match = skill_match
 
             # Case B: Adherence < 0.72 -> Block task and escalate to Lyra for research on skills.sh
