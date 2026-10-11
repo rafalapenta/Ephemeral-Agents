@@ -54,6 +54,11 @@ jobs:
           AGENCY_EMBEDDINGS: hash
         run: pytest --cov=. --cov-report=xml -v
 
+      - name: Run E2E dry-run smoke test
+        env:
+          AGENCY_EMBEDDINGS: hash
+        run: aggency run --dry-run "teste"
+
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         if: false  # Enable when you have a Codecov token

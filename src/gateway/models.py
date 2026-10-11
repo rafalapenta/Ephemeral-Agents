@@ -39,6 +39,56 @@ DEFAULT_BASE_URL = "http://localhost:20128/v1"
 DEFAULT_TIMEOUT = 120.0
 _DEFAULT_AGENT = "general"
 
+# ── Free-tier models and zero-cost detection ───────────────────
+KNOWN_FREE_MODELS: set[str] = {
+    "mistralai/mistral-7b-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemini-2.0-flash-exp:free",
+    "google/gemini-2.0-flash:free",
+    "qwen/qwen-2.5-coder-32b-instruct:free",
+    "deepseek/deepseek-chat:free",
+    "openrouter/auto:free",
+}
+
+
+def is_free_model(model_name: str | None) -> bool:
+    """Check if model is known to be free-tier (cost == 0.0)."""
+    if not model_name:
+        return False
+    clean = model_name.strip().lower()
+    if clean.startswith("openai/"):
+        clean = clean[len("openai/") :]
+    if ":free" in clean or clean.startswith("free/"):
+        return True
+    if clean in KNOWN_FREE_MODELS:
+        return True
+    extra_free = os.environ.get("AGENCY_FREE_MODELS", "")
+    if extra_free:
+        configured = {m.strip().lower() for m in extra_free.split(",") if m.strip()}
+        if clean in configured:
+            return True
+    return False
+
+
+def check_free_tier_compliance(
+    model: str,
+    max_cost: float = 0.0,
+    allow_paid: bool = False,
+) -> tuple[bool, str]:
+    """Verify if model adheres to free-tier and max-cost constraints."""
+    if allow_paid or max_cost > 0.0:
+        return True, "Paid model permitted"
+    if is_free_model(model):
+        return True, "Free-tier model verified"
+    clean = model.replace("openai/", "")
+    return False, (
+        f"Modelo '{clean}' recusado: não possui custo zero conhecido e --max-cost é 0.00. "
+        f"Configure um modelo gratuito em AGENCY_DEFAULT_MODEL (ex: com sufixo ':free') "
+        f"ou habilite AGENCY_ALLOW_PAID=1 no seu .env."
+    )
+
+
 # ── Fallback pricing table (per 1,000 tokens in USD) ────────────
 # EXAMPLE reference pricing table for cost estimation when litellm.completion_cost
 # is unavailable or unmapped on gateway endpoints. Clearly marked as example pricing.
@@ -91,14 +141,23 @@ def estimate_cost(
     """Estimate token cost in USD with progressive fallbacks.
 
     Order of precedence:
+    0. is_free_model check -> returns (0.0, "free_tier")
     1. litellm.completion_cost()
     2. Fallback pricing table (EXAMPLE_FALLBACK_PRICING or env overrides)
     3. Conservative default estimate (logs warning once per model)
 
     Returns:
         tuple[float, str]: (calculated_cost_usd, cost_source)
-        where cost_source is one of: "litellm", "fallback_table", "default_estimate"
+        where cost_source is one of: "free_tier", "litellm", "fallback_table", "default_estimate"
     """
+    clean_model = (model or "").strip()
+    if clean_model.startswith("openai/"):
+        clean_model = clean_model[len("openai/") :]
+
+    # 0. Free tier models are always zero cost
+    if is_free_model(clean_model):
+        return 0.0, "free_tier"
+
     import litellm
 
     # 1. Try LiteLLM completion_cost first
@@ -112,12 +171,7 @@ def estimate_cost(
         except Exception:
             pass
 
-    # 2. Try LiteLLM cost_per_token or completion_cost by model if model name provided
-    clean_model = (model or "").strip()
-    if clean_model.startswith("openai/"):
-        clean_model = clean_model[len("openai/") :]
-
-    # Check fallback table
+    # 2. Check fallback table
     pricing = EXAMPLE_FALLBACK_PRICING.get(clean_model) or EXAMPLE_FALLBACK_PRICING.get(
         model or ""
     )
@@ -361,18 +415,34 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
     base = _gateway_base()
     timeout = float(os.environ.get("HANDOFF_TIMEOUT_SECONDS", DEFAULT_TIMEOUT))
 
+    global_default = os.environ.get("AGENCY_DEFAULT_MODEL")
+    global_fallback = os.environ.get("AGENCY_FALLBACK_MODEL")
+
     # 1. Ephemeral subagents: always use the cheapest/free tier model
     if agent == "ephemeral":
-        ephemeral_override = os.environ.get("AGENCY_EPHEMERAL_MODEL")
+        ephemeral_override = os.environ.get("AGENCY_EPHEMERAL_MODEL") or global_default
         if ephemeral_override:
+            fallbacks: list[ModelChoice] = []
+            if global_fallback and global_fallback != ephemeral_override:
+                fallbacks.append(
+                    ModelChoice(
+                        global_fallback,
+                        "fast",
+                        0.2,
+                        2048,
+                        "AGENCY_FALLBACK_MODEL",
+                    )
+                )
             choice = ModelChoice(
                 ephemeral_override,
                 "fast",
                 0.2,
                 2048,
-                "AGENCY_EPHEMERAL_MODEL env override",
+                "AGENCY_EPHEMERAL_MODEL env override"
+                if os.environ.get("AGENCY_EPHEMERAL_MODEL")
+                else "AGENCY_DEFAULT_MODEL",
             )
-            chain = [choice]
+            chain = [choice, *fallbacks]
             source = "ephemeral-env"
         else:
             chain = [
@@ -387,16 +457,39 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
             ]
             source = "ephemeral-default"
     else:
-        # 2. Hard per-agent override wins over everything.
-        override = os.environ.get(f"AGENT_MODEL_{agent.upper()}")
+        # 2. Hard per-agent override wins over everything, then global default
+        override = os.environ.get(f"AGENT_MODEL_{agent.upper()}") or global_default
+        fallback_override = (
+            os.environ.get(f"AGENT_FALLBACK_{agent.upper()}") or global_fallback
+        )
         if override:
             choice = ModelChoice(
-                override, "override", 0.2, 4096, "AGENT_MODEL_* env override"
+                override,
+                "override",
+                0.2,
+                4096,
+                "AGENT_MODEL_* env override"
+                if os.environ.get(f"AGENT_MODEL_{agent.upper()}")
+                else "AGENCY_DEFAULT_MODEL",
             )
             chain = [choice]
+            if fallback_override and fallback_override != override:
+                chain.append(
+                    ModelChoice(
+                        fallback_override, "fallback", 0.2, 4096, "fallback override"
+                    )
+                )
             source = "env-override"
         else:
             chain = list(AGENT_MODELS.get(agent) or AGENT_MODELS.get("atlas", []))
+            if fallback_override and fallback_override != chain[0].model_id:
+                chain = [
+                    chain[0],
+                    ModelChoice(
+                        fallback_override, "fallback", 0.2, 4096, "fallback override"
+                    ),
+                    *chain[1:],
+                ]
             source = "registry"
 
         if not chain:

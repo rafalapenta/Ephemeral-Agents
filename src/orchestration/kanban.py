@@ -32,17 +32,23 @@ class KanbanStatus(str, Enum):
     REVIEW = "review"
     BLOCKED = "blocked"
     DONE = "done"
+    ESCALATED = "escalated"
 
 
 # Allowed transitions: source → set of valid targets
 _TRANSITIONS: dict[KanbanStatus, frozenset[KanbanStatus]] = {
-    KanbanStatus.TODO: frozenset({KanbanStatus.READY, KanbanStatus.BLOCKED}),
-    KanbanStatus.READY: frozenset({KanbanStatus.IN_PROGRESS, KanbanStatus.BLOCKED}),
+    KanbanStatus.TODO: frozenset(
+        {KanbanStatus.READY, KanbanStatus.BLOCKED, KanbanStatus.ESCALATED}
+    ),
+    KanbanStatus.READY: frozenset(
+        {KanbanStatus.IN_PROGRESS, KanbanStatus.BLOCKED, KanbanStatus.ESCALATED}
+    ),
     KanbanStatus.IN_PROGRESS: frozenset(
         {
             KanbanStatus.REVIEW,
             KanbanStatus.BLOCKED,
             KanbanStatus.DONE,
+            KanbanStatus.ESCALATED,
         }
     ),
     KanbanStatus.REVIEW: frozenset(
@@ -50,12 +56,21 @@ _TRANSITIONS: dict[KanbanStatus, frozenset[KanbanStatus]] = {
             KanbanStatus.IN_PROGRESS,
             KanbanStatus.DONE,
             KanbanStatus.BLOCKED,
+            KanbanStatus.ESCALATED,
         }
     ),
     KanbanStatus.BLOCKED: frozenset(
         {
             KanbanStatus.READY,
             KanbanStatus.TODO,
+            KanbanStatus.ESCALATED,
+        }
+    ),
+    KanbanStatus.ESCALATED: frozenset(
+        {
+            KanbanStatus.READY,
+            KanbanStatus.TODO,
+            KanbanStatus.BLOCKED,
         }
     ),
     KanbanStatus.DONE: frozenset(),  # terminal

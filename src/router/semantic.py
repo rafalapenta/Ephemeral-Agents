@@ -211,8 +211,16 @@ def route_agent(
     # 3. Hybrid Scoring Fusion
     candidates = set(vector_scores.keys()) | set(fts_scores.keys())
     if not candidates:
-        session.close()
-        raise CatalogEmptyError("agency_agents collection or database is empty")
+        all_agent_ids = [
+            r[0]
+            for r in session.execute(
+                select(Agent.agent_id).where(Agent.is_active.is_(True))
+            ).fetchall()
+        ]
+        if not all_agent_ids:
+            session.close()
+            raise CatalogEmptyError("agency_agents collection or database is empty")
+        candidates = set(all_agent_ids)
 
     # Resolve macro_domain for each candidate (for tie-breaking)
     domain_map: dict[str, str] = {}
