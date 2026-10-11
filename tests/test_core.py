@@ -2,6 +2,7 @@
 
 Run with: python3 tests/run_all.py  (or: python3 tests/test_core.py)
 """
+
 import sys
 import unittest
 from pathlib import Path

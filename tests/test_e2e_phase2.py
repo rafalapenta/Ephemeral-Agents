@@ -10,6 +10,7 @@ Validates the full lifecycle:
 Uses a fake router and dry-run handoff (no real DB/ChromaDB needed).
 Exit code 0 means all gates passed.
 """
+
 from __future__ import annotations
 
 import sys
@@ -38,34 +39,34 @@ def _fake_route_agent(
     return RouteAgentResult(
         matched=True,
         score=0.85,
-        agent_id='engineering-frontend-developer',
-        name='Frontend Developer',
-        macro_domain='engineering',
-        system_prompt='You are a frontend engineering specialist.',
+        agent_id="engineering-frontend-developer",
+        name="Frontend Developer",
+        macro_domain="engineering",
+        system_prompt="You are a frontend engineering specialist.",
         tools=[],
-        reason='matched candidate above threshold',
+        reason="matched candidate above threshold",
     )
 
 
 def main() -> int:
     results: dict[str, int] = {}
 
-    with tempfile.TemporaryDirectory(prefix='aggency-e2e-') as tmp:
-        state_dir = Path(tmp) / 'state'
+    with tempfile.TemporaryDirectory(prefix="aggency-e2e-") as tmp:
+        state_dir = Path(tmp) / "state"
 
         # Patch route_agent globally so MacroOrchestrator uses the fake
         with patch(
-            'src.macro_agents.orchestrator.route_agent',
+            "src.macro_agents.orchestrator.route_agent",
             side_effect=_fake_route_agent,
         ):
             orch = MacroOrchestrator(state_dir=state_dir)
             result = orch.orchestrate(
-                title='E2E smoke test task',
-                body='Validate the full orchestration lifecycle',
-                query='React frontend accessibility web performance',
-                priority='high',
-                assignee='e2e-tester',
-                source_agent='smoke-test',
+                title="E2E smoke test task",
+                body="Validate the full orchestration lifecycle",
+                query="React frontend accessibility web performance",
+                priority="high",
+                assignee="e2e-tester",
+                source_agent="smoke-test",
             )
 
         # ── Evaluate gates ─────────────────────────────────
@@ -76,26 +77,25 @@ def main() -> int:
         # ── State invariant ────────────────────────────────
         state = orch.state.get()
         state_ok = (
-            state.get('state_version', 0) > 0
-            and state.get('phase') == 'completed'
+            state.get("state_version", 0) > 0 and state.get("phase") == "completed"
         )
-        results['STATE_INVARIANT'] = 0 if state_ok else 1
+        results["STATE_INVARIANT"] = 0 if state_ok else 1
 
         # ── Overall update check ───────────────────────────
-        results['UPDATE'] = 0 if result.status == 'completed' else 1
+        results["UPDATE"] = 0 if result.status == "completed" else 1
 
     # ── Print results ──────────────────────────────────────
     for key, val in sorted(results.items()):
-        print(f'{key}={val}')
+        print(f"{key}={val}")
 
     overall = max(results.values()) if results else 1
     if overall == 0:
-        print('\n✅ All gates passed.')
+        print("\n✅ All gates passed.")
     else:
-        print('\n❌ Some gates failed.')
+        print("\n❌ Some gates failed.")
 
     return overall
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

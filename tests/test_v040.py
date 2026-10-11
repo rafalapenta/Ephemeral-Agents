@@ -2,6 +2,7 @@
 
 Run with: python3 tests/run_all.py  (or: python3 tests/test_v040.py)
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -34,10 +35,18 @@ class ChatHistoryTests(unittest.TestCase):
         history = server.load_chat_history()
         history.setdefault("messages", []).append(msg)
         server.save_chat_message(msg)
+
     def test_history_empty_by_default(self):
         # Clear any messages seeded by prior tests in this class
-        server.save_chat_message({"id": "clear", "role": "user", "agent": "opencode",
-                                  "content": "", "timestamp": ""})
+        server.save_chat_message(
+            {
+                "id": "clear",
+                "role": "user",
+                "agent": "opencode",
+                "content": "",
+                "timestamp": "",
+            }
+        )
         history = server.load_chat_history()
         history["messages"] = []
         server.CHAT_HISTORY_FILE.write_text(__import__("json").dumps(history))

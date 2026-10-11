@@ -3,6 +3,7 @@
 Validates the strict allowlist validation added in commit 4af5ea3:
 skill names, kanban task ids, journal dates, scheduler job names, backup files.
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -38,8 +39,9 @@ class SecurityTests(unittest.TestCase):
 
     def test_skill_run_traversal_rejected(self):
         for evil in [quote("../../settings"), quote("..%2F..%2Fdata%2Fsettings")]:
-            status, _ = self.h.api("POST", f"/api/skills/{evil}/run",
-                                   {"agent": "hermes", "input": "x"})
+            status, _ = self.h.api(
+                "POST", f"/api/skills/{evil}/run", {"agent": "hermes", "input": "x"}
+            )
             self.assertNotEqual(status, 200, f"skill run traversal slipped: {evil}")
 
     def test_skill_eval_traversal_rejected(self):
@@ -70,11 +72,19 @@ class SecurityTests(unittest.TestCase):
     def test_journal_traversal_rejected(self):
         status, _ = self.h.api("GET", "/api/journal/entries/../../settings")
         self.assertNotEqual(status, 200)
-        status, _ = self.h.api("GET", "/api/journal/entries/2026-06-05%2F..%2F..%2Fetc%2Fpasswd")
+        status, _ = self.h.api(
+            "GET", "/api/journal/entries/2026-06-05%2F..%2F..%2Fetc%2Fpasswd"
+        )
         self.assertNotEqual(status, 200)
 
     def test_journal_bad_date_format_rejected(self):
-        for evil in ["2026-6-5", quote("2026/06/05"), "2026.06.05", "06-05-2026", "20260605"]:
+        for evil in [
+            "2026-6-5",
+            quote("2026/06/05"),
+            "2026.06.05",
+            "06-05-2026",
+            "20260605",
+        ]:
             status, _ = self.h.api("GET", f"/api/journal/entries/{evil}")
             # 400 = validator rejection, 404 = slash decoded before routing
             self.assertIn(status, (400, 404), f"bad date accepted: {evil}")
@@ -85,21 +95,24 @@ class SecurityTests(unittest.TestCase):
 
     def test_scheduler_job_traversal_rejected(self):
         status, _ = self.h.api(
-            "POST", "/api/scheduler/jobs",
+            "POST",
+            "/api/scheduler/jobs",
             {"name": "../../evil", "skill": "heartbeat", "cron": "* * * * *"},
         )
         self.assertEqual(status, 400)
 
     def test_scheduler_job_invalid_name_rejected(self):
         status, _ = self.h.api(
-            "POST", "/api/scheduler/jobs",
+            "POST",
+            "/api/scheduler/jobs",
             {"name": "evil/../x", "skill": "heartbeat", "cron": "* * * * *"},
         )
         self.assertEqual(status, 400)
 
     def test_scheduler_job_valid_name_works(self):
         status, data = self.h.api(
-            "POST", "/api/scheduler/jobs",
+            "POST",
+            "/api/scheduler/jobs",
             {"name": "test-job-v4", "skill": "heartbeat", "cron": "0 0 * * *"},
         )
         self.assertEqual(status, 200)

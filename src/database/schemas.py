@@ -63,7 +63,9 @@ class SkillCreate(CatalogModel):
 
 
 class SkillRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True, extra="ignore")
+    model_config = ConfigDict(
+        from_attributes=True, str_strip_whitespace=True, extra="ignore"
+    )
 
     id: str
     name: str
@@ -75,7 +77,9 @@ class SkillRead(BaseModel):
 
 
 class DirectorSkillLink(CatalogModel):
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True, extra="ignore")
+    model_config = ConfigDict(
+        from_attributes=True, str_strip_whitespace=True, extra="ignore"
+    )
 
     director_id: str = Field(min_length=1)
     skill_id: str = Field(min_length=1)
@@ -97,7 +101,9 @@ class SkillUsageCreate(BaseModel):
     parent_task_id: str | None = None
     is_ephemeral: bool = False
     adherence_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    outcome: str = Field(pattern=r"^(success|failure|escalated|missing_skill|limit_exceeded)$")
+    outcome: str = Field(
+        pattern=r"^(success|failure|escalated|missing_skill|limit_exceeded)$"
+    )
     gates_passed: bool = True
     model: str = "unknown"
     prompt_tokens: int = Field(default=0, ge=0)
@@ -108,7 +114,9 @@ class SkillUsageCreate(BaseModel):
 
 
 class SkillUsageRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True, extra="ignore")
+    model_config = ConfigDict(
+        from_attributes=True, str_strip_whitespace=True, extra="ignore"
+    )
 
     id: str
     created_at: datetime | None = None
@@ -126,5 +134,3 @@ class SkillUsageRead(BaseModel):
     cost_usd: float
     duration_ms: float
     note: str
-
-

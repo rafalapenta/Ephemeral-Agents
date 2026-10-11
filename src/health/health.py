@@ -3,6 +3,7 @@
 Provides health checks for agents: catalog integrity, SOUL.md validation,
 routing responsiveness, and Kanban board state.
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 class AgentHealthReport(BaseModel):
     """Health report for a single agent."""
+
     agent_id: str
     name: str
     macro_domain: str
@@ -29,6 +31,7 @@ class AgentHealthReport(BaseModel):
 
 class SystemHealthReport(BaseModel):
     """Overall system health report."""
+
     status: str = "unknown"  # "healthy", "degraded", "unhealthy"
     timestamp: float = Field(default_factory=time.time)
     agent_reports: dict[str, AgentHealthReport] = Field(default_factory=dict)
@@ -46,13 +49,13 @@ def check_agent_health(
     from src.catalog.indexer import discover_agent_files, parse_agent_markdown
     from src.router.semantic import route_agent, CatalogEmptyError
     from src.orchestration.kanban import KanbanBoard
-    
+
     report = AgentHealthReport(agent_id=agent_id)
-    
+
     # 1. Check SOUL.md exists and is valid
     if source_root is None:
         source_root = Path(__file__).parent.parent / "bots_config"
-    
+
     soul_path = source_root / agent_id / "SOUL.md"
     if soul_path.exists():
         try:
@@ -60,16 +63,20 @@ def check_agent_health(
             # Basic validation: check for required sections
             has_frontmatter = content.startswith("---")
             has_identity = "## Identity" in content
-            has_directives = "## Core Directives" in content or "## Diretivas" in content
-            
+            has_directives = (
+                "## Core Directives" in content or "## Diretivas" in content
+            )
+
             report.checks["soul_exists"] = True
             report.checks["soul_valid_frontmatter"] = has_frontmatter
             report.checks["soul_has_identity"] = has_identity
             report.checks["soul_has_directives"] = has_directives
-            
+
             if has_frontmatter and has_identity and has_directives:
                 report.status = "healthy"
-                report.metadata["soul_path"] = str(soul_path.relative_to(source_root.parent))
+                report.metadata["soul_path"] = str(
+                    soul_path.relative_to(source_root.parent)
+                )
             else:
                 report.status = "degraded"
                 report.errors.append("SOUL.md missing required sections")
@@ -79,15 +86,17 @@ def check_agent_health(
     else:
         report.status = "missing"
         report.errors.append(f"SOUL.md not found at {soul_path}")
-    
+
     # 2. Test routing responsiveness
     try:
         from src.router.semantic import route_agent, CatalogEmptyError
+
         # Quick routing test with empty query will fail, but we can test catalog access
         # by checking if we can list agents via a dummy query
         start = time.time()
         # Just test if database is accessible by attempting a simple query
         from src.catalog.indexer import run_indexing
+
         # We don't want to actually reindex, just check connectivity
         report.metadata["routing_test"] = "catalog_accessible"
         report.metadata["routing_timestamp"] = time.time() - start
@@ -98,7 +107,7 @@ def check_agent_health(
     except Exception as exc:
         report.status = "unhealthy"
         report.errors.append(f"Routing test failed: {exc}")
-    
+
     return report
 
 
@@ -109,13 +118,14 @@ def check_system_health(
 ) -> SystemHealthReport:
     """Check overall system health including all agents, catalog, routing, and Kanban."""
     report = SystemHealthReport()
-    
+
     if source_root is None:
         source_root = Path(__file__).parent.parent / "bots_config"
-    
+
     # 1. Check catalog integrity
     try:
         from src.catalog.indexer import discover_agent_files, run_indexing
+
         agent_files = list(discover_agent_files(source_root))
         report.catalog["agent_files_count"] = len(agent_files)
         report.catalog["agent_files"] = [str(f.name) for f in agent_files]
@@ -123,10 +133,11 @@ def check_system_health(
     except Exception as exc:
         report.catalog["catalog_accessible"] = False
         report.errors.append(f"Catalog check failed: {exc}")
-    
+
     # 2. Check ChromaDB
     try:
         import chromadb
+
         if chroma_path:
             client = chromadb.PersistentClient(path=str(chroma_path))
             collection = client.get_collection("agency_agents")
@@ -138,25 +149,29 @@ def check_system_health(
     except Exception as exc:
         report.catalog["chroma_accessible"] = False
         report.errors.append(f"ChromaDB check failed: {exc}")
-    
+
     # 3. Check SQLite database
     try:
         from sqlalchemy import create_engine, text
         from src.database.models import Base
+
         db_url = database_url or "sqlite:///:memory:"
         engine = create_engine(db_url)
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
+            result = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table';")
+            )
             tables = [row[0] for row in result.fetchall()]
             report.catalog["sqlite_tables"] = tables
             report.catalog["sqlite_accessible"] = True
     except Exception as exc:
         report.catalog["sqlite_accessible"] = False
         report.errors.append(f"SQLite check failed: {exc}")
-    
+
     # 4. Check routing responsiveness
     try:
         from src.router.semantic import route_agent, CatalogEmptyError
+
         start = time.time()
         # Use a simple query to test routing
         try:
@@ -179,23 +194,30 @@ def check_system_health(
     except Exception as exc:
         report.routing["routing_accessible"] = False
         report.errors.append(f"Router import failed: {exc}")
-    
+
     # 5. Check Kanban board state
     try:
         from src.orchestration.kanban import KanbanBoard
+
         board = KanbanBoard()
         # Create a dummy task to test board operations
         from src.orchestration.kanban import KanbanTask, KanbanStatus
+
         test_task = KanbanTask(title="Health Check Test", body="System health check")
         board.add(test_task)
         board.transition(test_task.task_id, KanbanStatus.READY, actor="health_check")
-        board.transition(test_task.task_id, KanbanStatus.DONE, actor="health_check", reason="test complete")
+        board.transition(
+            test_task.task_id,
+            KanbanStatus.DONE,
+            actor="health_check",
+            reason="test complete",
+        )
         report.kanban["board_accessible"] = True
         report.kanban["operations_tested"] = ["add", "transition"]
     except Exception as exc:
         report.kanban["board_accessible"] = False
         report.errors.append(f"Kanban check failed: {exc}")
-    
+
     # 6. Check individual agents
     try:
         agent_files = list(discover_agent_files(source_root))
@@ -205,21 +227,18 @@ def check_system_health(
             report.agent_reports[agent_id] = agent_report
     except Exception as exc:
         report.errors.append(f"Agent health check failed: {exc}")
-    
+
     # 7. Determine overall status
     unhealthy_count = sum(
-        1 for r in report.agent_reports.values()
-        if r.status == "unhealthy"
+        1 for r in report.agent_reports.values() if r.status == "unhealthy"
     )
     degraded_count = sum(
-        1 for r in report.agent_reports.values()
-        if r.status == "degraded"
+        1 for r in report.agent_reports.values() if r.status == "degraded"
     )
     missing_count = sum(
-        1 for r in report.agent_reports.values()
-        if r.status == "missing"
+        1 for r in report.agent_reports.values() if r.status == "missing"
     )
-    
+
     if unhealthy_count > 0:
         report.status = "unhealthy"
     elif degraded_count > 0 or missing_count > 0:
@@ -228,15 +247,17 @@ def check_system_health(
         report.status = "degraded"
     else:
         report.status = "healthy"
-    
+
     report.metadata = {
         "total_agents": len(report.agent_reports),
-        "healthy_agents": sum(1 for r in report.agent_reports.values() if r.status == "healthy"),
+        "healthy_agents": sum(
+            1 for r in report.agent_reports.values() if r.status == "healthy"
+        ),
         "degraded_agents": degraded_count,
         "unhealthy_agents": unhealthy_count,
         "missing_agents": missing_count,
     }
-    
+
     return report
 
 

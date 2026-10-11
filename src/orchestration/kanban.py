@@ -9,6 +9,7 @@ Models task lifecycle as a deterministic state machine:
 Every transition is validated and recorded in the audit trail.
 Now integrated with Linear GraphQL API for cloud state synchronization.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,6 +21,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
 
 class KanbanStatus(str, Enum):
     """Valid Kanban column states."""
@@ -36,20 +38,26 @@ class KanbanStatus(str, Enum):
 _TRANSITIONS: dict[KanbanStatus, frozenset[KanbanStatus]] = {
     KanbanStatus.TODO: frozenset({KanbanStatus.READY, KanbanStatus.BLOCKED}),
     KanbanStatus.READY: frozenset({KanbanStatus.IN_PROGRESS, KanbanStatus.BLOCKED}),
-    KanbanStatus.IN_PROGRESS: frozenset({
-        KanbanStatus.REVIEW,
-        KanbanStatus.BLOCKED,
-        KanbanStatus.DONE,
-    }),
-    KanbanStatus.REVIEW: frozenset({
-        KanbanStatus.IN_PROGRESS,
-        KanbanStatus.DONE,
-        KanbanStatus.BLOCKED,
-    }),
-    KanbanStatus.BLOCKED: frozenset({
-        KanbanStatus.READY,
-        KanbanStatus.TODO,
-    }),
+    KanbanStatus.IN_PROGRESS: frozenset(
+        {
+            KanbanStatus.REVIEW,
+            KanbanStatus.BLOCKED,
+            KanbanStatus.DONE,
+        }
+    ),
+    KanbanStatus.REVIEW: frozenset(
+        {
+            KanbanStatus.IN_PROGRESS,
+            KanbanStatus.DONE,
+            KanbanStatus.BLOCKED,
+        }
+    ),
+    KanbanStatus.BLOCKED: frozenset(
+        {
+            KanbanStatus.READY,
+            KanbanStatus.TODO,
+        }
+    ),
     KanbanStatus.DONE: frozenset(),  # terminal
 }
 
@@ -111,6 +119,7 @@ class KanbanBoard:
             return None
         if self._linear is None:
             from src.orchestration.linear_client import get_linear_client
+
             self._linear = get_linear_client()
         return self._linear
 
@@ -160,8 +169,7 @@ class KanbanBoard:
         from_status = task.status
         if to_status not in _TRANSITIONS.get(from_status, frozenset()):
             raise TransitionError(
-                f"transition {from_status.value!r} → {to_status.value!r} "
-                f"is not allowed"
+                f"transition {from_status.value!r} → {to_status.value!r} is not allowed"
             )
 
         entry = AuditEntry(
@@ -189,15 +197,23 @@ class KanbanBoard:
                 KanbanStatus.IN_PROGRESS: "In Progress",
                 KanbanStatus.REVIEW: "In Review",
                 KanbanStatus.DONE: "Done",
-                KanbanStatus.BLOCKED: "Canceled"
+                KanbanStatus.BLOCKED: "Canceled",
             }
             target = state_map.get(to_status, "Todo")
             try:
                 success = self.linear.update_issue_state(task_id, target)
-                if success and to_status == KanbanStatus.DONE and reason == "handoff completed":
-                    self.linear.add_comment(task_id, "Agent execution completed successfully.")
+                if (
+                    success
+                    and to_status == KanbanStatus.DONE
+                    and reason == "handoff completed"
+                ):
+                    self.linear.add_comment(
+                        task_id, "Agent execution completed successfully."
+                    )
             except Exception as e:
-                logger.warning(f"Failed to sync state to Linear for task {task_id}: {e}")
+                logger.warning(
+                    f"Failed to sync state to Linear for task {task_id}: {e}"
+                )
 
         return task
 
@@ -209,9 +225,7 @@ class KanbanBoard:
         summary: str = "",
     ) -> KanbanTask:
         """Convenience: move a task to DONE from IN_PROGRESS or REVIEW."""
-        return self.transition(
-            task_id, KanbanStatus.DONE, actor=actor, reason=summary
-        )
+        return self.transition(task_id, KanbanStatus.DONE, actor=actor, reason=summary)
 
     def block(
         self,

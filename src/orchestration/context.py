@@ -6,42 +6,47 @@ while preserving essential fields for downstream consumption.
 The compressor removes verbose or redundant keys and truncates
 oversized text fields to keep handoff payloads lean.
 """
+
 from __future__ import annotations
 
 import copy
 from typing import Any
 
 # Fields always preserved in compressed output
-_ESSENTIAL_KEYS = frozenset({
-    "task_id",
-    "title",
-    "body",
-    "status",
-    "priority",
-    "assignee",
-    "macro_domain",
-    "source_agent",
-    "target_agent",
-    "state_version",
-    "created_at",
-    "updated_at",
-    "error",
-    "result",
-    "system_prompt",
-    "ephemeral_skill",
-    "ephemeral_skill_md",
-})
+_ESSENTIAL_KEYS = frozenset(
+    {
+        "task_id",
+        "title",
+        "body",
+        "status",
+        "priority",
+        "assignee",
+        "macro_domain",
+        "source_agent",
+        "target_agent",
+        "state_version",
+        "created_at",
+        "updated_at",
+        "error",
+        "result",
+        "system_prompt",
+        "ephemeral_skill",
+        "ephemeral_skill_md",
+    }
+)
 
 # Fields removed during compression (verbose/diagnostic)
-_DROP_KEYS = frozenset({
-    "full_log",
-    "raw_response",
-    "debug_trace",
-    "intermediate_steps",
-    "embedding_vector",
-    "token_usage_details",
-    "internal_metadata",
-})
+_DROP_KEYS = frozenset(
+    {
+        "full_log",
+        "raw_response",
+        "debug_trace",
+        "intermediate_steps",
+        "embedding_vector",
+        "token_usage_details",
+        "internal_metadata",
+    }
+)
 
 # Maximum length (in chars) for any single non-essential string value after compression
 _MAX_STRING_LEN = 2000
@@ -67,7 +72,9 @@ def compress_context(
     essentials = essential_keys or _ESSENTIAL_KEYS
     drops = drop_keys or _DROP_KEYS
 
-    return _compress(context, essentials=essentials, drops=drops, max_len=max_string_len)
+    return _compress(
+        context, essentials=essentials, drops=drops, max_len=max_string_len
+    )
 
 
 def _compress(
@@ -82,7 +89,9 @@ def _compress(
         for key, value in obj.items():
             if key in drops and key not in essentials:
                 continue
-            if key in ("system_prompt", "ephemeral_skill_md") and isinstance(value, str):
+            if key in ("system_prompt", "ephemeral_skill_md") and isinstance(
+                value, str
+            ):
                 result[key] = value
             else:
                 result[key] = _compress(
@@ -128,7 +137,9 @@ def inject_ephemeral_skill(
 
     content_md = getattr(skill, "content_md", "") or ""
     if len(content_md) > max_chars:
-        content_md = content_md[:max_chars].rstrip() + "\n... [truncated to fit token_budget]"
+        content_md = (
+            content_md[:max_chars].rstrip() + "\n... [truncated to fit token_budget]"
+        )
 
     skill_id = getattr(skill, "id", "")
     skill_name = getattr(skill, "name", skill_id)
@@ -145,7 +156,9 @@ def inject_ephemeral_skill(
         section = f"\n\n---\n## Ephemeral Skill: {skill_name} ({skill_id})\n{content_md}\n---\n"
         payload["system_prompt"] = str(payload["system_prompt"]) + section
     else:
-        payload["system_prompt"] = f"## Ephemeral Skill: {skill_name} ({skill_id})\n{content_md}"
+        payload["system_prompt"] = (
+            f"## Ephemeral Skill: {skill_name} ({skill_id})\n{content_md}"
+        )
 
     payload["ephemeral_skill_md"] = content_md
     return payload
@@ -153,12 +166,13 @@ def inject_ephemeral_skill(
 
 def sanitize_context(context: dict[str, Any] | None) -> dict[str, Any]:
     """Sanitize context dictionary by removing private keys and non-JSON serializable objects.
-    
+
     - Strips any key starting with '_' (e.g. '_state_manager', '_db_url', '_limits')
     - Drops any value that fails json.dumps serialization (e.g. class instances, functions, modules)
     """
     import json
     import logging
+
     _log = logging.getLogger(__name__)
 
     if not context or not isinstance(context, dict):
@@ -177,4 +191,3 @@ def sanitize_context(context: dict[str, Any] | None) -> dict[str, Any]:
             continue
 
     return sanitized
-

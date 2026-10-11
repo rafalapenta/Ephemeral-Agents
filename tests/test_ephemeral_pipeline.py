@@ -1,4 +1,5 @@
 """Unit and integration tests for Ephemeral Agents orchestration pipeline (Etapas 1-4)."""
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,12 @@ from src.governance.limits import EphemeralLimits, get_cost_report
 from src.macro_agents.ephemeral import execute_ephemeral_task
 from src.macro_agents.handoff import litellm_handoff
 from src.macro_agents.orchestrator import MacroOrchestrator
-from src.orchestration.kanban import MISSING_SKILL, KanbanBoard, KanbanStatus, KanbanTask
+from src.orchestration.kanban import (
+    MISSING_SKILL,
+    KanbanBoard,
+    KanbanStatus,
+    KanbanTask,
+)
 from src.router.semantic import RouteAgentResult
 
 
@@ -79,7 +85,9 @@ def setup_ephemeral_db(tmp_path: Path):
     }
 
 
-def test_etapa1_skill_injected_into_llm_messages(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa1_skill_injected_into_llm_messages(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 1: Verify that the chosen skill content reaches litellm.completion messages."""
     db_url = setup_ephemeral_db["db_url"]
     state_dir = setup_ephemeral_db["state_dir"]
@@ -154,7 +162,9 @@ def test_etapa1_skill_injected_into_llm_messages(setup_ephemeral_db, monkeypatch
     assert "Kubernetes Bare-Metal Migrator" in user_content
 
 
-def test_etapa2_director_spawns_ephemeral_loop(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa2_director_spawns_ephemeral_loop(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 2: Director calls spawn_ephemeral, child subtask is created and completed, output returns to director."""
     db_url = setup_ephemeral_db["db_url"]
     state_dir = setup_ephemeral_db["state_dir"]
@@ -185,18 +195,26 @@ def test_etapa2_director_spawns_ephemeral_loop(setup_ephemeral_db, monkeypatch: 
             mock_tool_call = MagicMock()
             mock_tool_call.id = "call_abc123"
             mock_tool_call.function.name = "spawn_ephemeral"
-            mock_tool_call.function.arguments = json.dumps({
-                "skill_id": "playwright-runner",
-                "subtask_title": "Run Playwright E2E Tests",
-                "subtask_body": "Execute checkout flow tests on staging",
-                "expected_output": "All 12 tests passing",
-            })
+            mock_tool_call.function.arguments = json.dumps(
+                {
+                    "skill_id": "playwright-runner",
+                    "subtask_title": "Run Playwright E2E Tests",
+                    "subtask_body": "Execute checkout flow tests on staging",
+                    "expected_output": "All 12 tests passing",
+                }
+            )
             mock_choice = MagicMock()
-            mock_choice.message.content = "Delegating E2E testing to ephemeral subagent."
+            mock_choice.message.content = (
+                "Delegating E2E testing to ephemeral subagent."
+            )
             mock_choice.message.tool_calls = [mock_tool_call]
             mock_resp = MagicMock()
             mock_resp.choices = [mock_choice]
-            mock_resp.usage.model_dump.return_value = {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}
+            mock_resp.usage.model_dump.return_value = {
+                "prompt_tokens": 100,
+                "completion_tokens": 30,
+                "total_tokens": 130,
+            }
             return mock_resp
 
         # Turn 2: Ephemeral subagent execution
@@ -204,11 +222,17 @@ def test_etapa2_director_spawns_ephemeral_loop(setup_ephemeral_db, monkeypatch: 
             # Ephemerals receive no tools
             assert "tools" not in kwargs or kwargs.get("tools") is None
             mock_choice = MagicMock()
-            mock_choice.message.content = "Playwright test suite finished: 12/12 passed."
+            mock_choice.message.content = (
+                "Playwright test suite finished: 12/12 passed."
+            )
             mock_choice.message.tool_calls = None
             mock_resp = MagicMock()
             mock_resp.choices = [mock_choice]
-            mock_resp.usage.model_dump.return_value = {"prompt_tokens": 80, "completion_tokens": 20, "total_tokens": 100}
+            mock_resp.usage.model_dump.return_value = {
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+                "total_tokens": 100,
+            }
             return mock_resp
 
         # Turn 3: Director receives tool response and finalizes
@@ -217,7 +241,11 @@ def test_etapa2_director_spawns_ephemeral_loop(setup_ephemeral_db, monkeypatch: 
         mock_choice.message.tool_calls = None
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 175}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 150,
+            "completion_tokens": 25,
+            "total_tokens": 175,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", fake_completion)
@@ -253,7 +281,9 @@ def test_etapa2_director_spawns_ephemeral_loop(setup_ephemeral_db, monkeypatch: 
     assert subtask.assignee == "ephemeral"
 
 
-def test_etapa2_ephemeral_has_no_tools_depth_bounded(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa2_ephemeral_has_no_tools_depth_bounded(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 2: Ephemeral subagents never receive tools, enforcing max_depth=1."""
     db_url = setup_ephemeral_db["db_url"]
     captured_kwargs = {}
@@ -264,7 +294,11 @@ def test_etapa2_ephemeral_has_no_tools_depth_bounded(setup_ephemeral_db, monkeyp
         mock_choice.message.content = "Isolated output."
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", fake_completion)
@@ -308,12 +342,19 @@ def test_etapa2_missing_skill_escalation(setup_ephemeral_db):
     assert "not found in catalog" in res["error"]
 
     # Verify subtask is BLOCKED with MISSING_SKILL
-    subtasks = [t for t in board.tasks.values() if t.parent_task_id == parent_task.task_id]
+    subtasks = [
+        t for t in board.tasks.values() if t.parent_task_id == parent_task.task_id
+    ]
     assert len(subtasks) >= 1
-    assert any(t.status == KanbanStatus.BLOCKED and t.blocked_reason == MISSING_SKILL for t in subtasks)
+    assert any(
+        t.status == KanbanStatus.BLOCKED and t.blocked_reason == MISSING_SKILL
+        for t in subtasks
+    )
 
 
-def test_etapa3_privacy_skill_usage_no_task_content(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa3_privacy_skill_usage_no_task_content(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 3 (Privacy): SkillUsage records metrics only, NEVER storing prompt/body/customer data."""
     db_url = setup_ephemeral_db["db_url"]
     state_dir = setup_ephemeral_db["state_dir"]
@@ -341,7 +382,11 @@ def test_etapa3_privacy_skill_usage_no_task_content(setup_ephemeral_db, monkeypa
         mock_choice.message.tool_calls = None
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 120,
+            "completion_tokens": 40,
+            "total_tokens": 160,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", fake_completion)
@@ -368,7 +413,11 @@ def test_etapa3_privacy_skill_usage_no_task_content(setup_ephemeral_db, monkeypa
     # Query SQLite SkillUsage table
     engine = create_engine(db_url)
     with Session(engine) as session:
-        records = list(session.scalars(select(SkillUsage).where(SkillUsage.task_id == task.task_id)).all())
+        records = list(
+            session.scalars(
+                select(SkillUsage).where(SkillUsage.task_id == task.task_id)
+            ).all()
+        )
         assert len(records) >= 1
         for rec in records:
             # None of the fields should contain the secret
@@ -451,7 +500,9 @@ def test_etapa3_prune_skill_usage(setup_ephemeral_db):
         assert remaining[0].id == "recent-1"
 
 
-def test_etapa3_skill_usage_failure_does_not_crash_orchestration(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa3_skill_usage_failure_does_not_crash_orchestration(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 3 (Resilience): DB failure during SkillUsage logging does not crash orchestration."""
     db_url = setup_ephemeral_db["db_url"]
     state_dir = setup_ephemeral_db["state_dir"]
@@ -477,7 +528,11 @@ def test_etapa3_skill_usage_failure_does_not_crash_orchestration(setup_ephemeral
         mock_choice.message.tool_calls = None
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", fake_completion)
@@ -486,7 +541,9 @@ def test_etapa3_skill_usage_failure_does_not_crash_orchestration(setup_ephemeral
     def broken_record_skill_usage(*args, **kwargs):
         raise RuntimeError("Database connection suddenly dropped!")
 
-    monkeypatch.setattr("src.macro_agents.handoff.record_skill_usage", broken_record_skill_usage)
+    monkeypatch.setattr(
+        "src.macro_agents.handoff.record_skill_usage", broken_record_skill_usage
+    )
 
     orchestrator = MacroOrchestrator(
         state_dir=state_dir,
@@ -508,7 +565,9 @@ def test_etapa3_skill_usage_failure_does_not_crash_orchestration(setup_ephemeral
     assert result.status == "completed"
 
 
-def test_etapa4_limit_exceeded_ephemerals_and_tokens(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_etapa4_limit_exceeded_ephemerals_and_tokens(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test ETAPA 4: Exceeding max_ephemerals_per_task or max_tokens_per_task blocks task with limit_exceeded."""
     db_url = setup_ephemeral_db["db_url"]
     state_dir = setup_ephemeral_db["state_dir"]
@@ -540,18 +599,24 @@ def test_etapa4_limit_exceeded_ephemerals_and_tokens(setup_ephemeral_db, monkeyp
         mock_tool_call = MagicMock()
         mock_tool_call.id = f"call_{call_count}"
         mock_tool_call.function.name = "spawn_ephemeral"
-        mock_tool_call.function.arguments = json.dumps({
-            "skill_id": "playwright-runner",
-            "subtask_title": f"Subtask {call_count}",
-            "subtask_body": "Run tests",
-            "expected_output": "OK",
-        })
+        mock_tool_call.function.arguments = json.dumps(
+            {
+                "skill_id": "playwright-runner",
+                "subtask_title": f"Subtask {call_count}",
+                "subtask_body": "Run tests",
+                "expected_output": "OK",
+            }
+        )
         mock_choice = MagicMock()
         mock_choice.message.content = "Spawning subtask..."
         mock_choice.message.tool_calls = [mock_tool_call]
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", fake_completion)
@@ -575,7 +640,7 @@ def test_etapa4_limit_exceeded_ephemerals_and_tokens(setup_ephemeral_db, monkeyp
     # First ephemeral succeeds, second attempt fails with limit_exceeded
     board = KanbanBoard(sync_linear=False)
     limits = EphemeralLimits(max_ephemerals_per_task=1)
-    
+
     res1 = execute_ephemeral_task(
         skill_id="playwright-runner",
         subtask_title="Subtask 1",
@@ -607,16 +672,22 @@ def test_etapa4_limit_exceeded_ephemerals_and_tokens(setup_ephemeral_db, monkeyp
     assert rep["limit_exceeded"] is True
 
 
-def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_estimate_cost_fallback_and_limit_exceeded(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test PONTO 1: When completion_cost is 0, estimate_cost falls back to table, cost > 0, and limits trigger."""
     from src.gateway.models import estimate_cost
 
     # 1. Test unit behavior of estimate_cost
-    cost, source = estimate_cost("mistral/codestral-latest", prompt_tokens=1000, completion_tokens=1000)
+    cost, source = estimate_cost(
+        "mistral/codestral-latest", prompt_tokens=1000, completion_tokens=1000
+    )
     assert cost > 0.0
     assert source == "fallback_table"
 
-    unknown_cost, unknown_source = estimate_cost("nonexistent-custom-model", prompt_tokens=1000, completion_tokens=1000)
+    unknown_cost, unknown_source = estimate_cost(
+        "nonexistent-custom-model", prompt_tokens=1000, completion_tokens=1000
+    )
     assert unknown_cost > 0.0
     assert unknown_source == "default_estimate"
 
@@ -641,7 +712,11 @@ def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypat
     mock_choice.message.tool_calls = None
     mock_resp = MagicMock()
     mock_resp.choices = [mock_choice]
-    mock_resp.usage.model_dump.return_value = {"prompt_tokens": 500, "completion_tokens": 500, "total_tokens": 1000}
+    mock_resp.usage.model_dump.return_value = {
+        "prompt_tokens": 500,
+        "completion_tokens": 500,
+        "total_tokens": 1000,
+    }
 
     monkeypatch.setattr("litellm.completion", lambda *args, **kwargs: mock_resp)
 
@@ -679,7 +754,9 @@ def test_estimate_cost_fallback_and_limit_exceeded(setup_ephemeral_db, monkeypat
     assert cost_rep["cost_source"] in ("fallback_table", "default_estimate")
 
 
-def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_handoff_fn_protocol_and_no_inspect(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test PONTO 2: Standardized handoff_fn signature receives task, route_result, and context."""
     from src.macro_agents.handoff import HandoffFn, HandoffRuntime
 
@@ -695,7 +772,11 @@ def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pyt
         received_args["route"] = route
         received_args["context"] = context
         received_args["runtime"] = runtime
-        return {"status": "success", "agent_id": route.agent_id, "reply": "Handled custom"}
+        return {
+            "status": "success",
+            "agent_id": route.agent_id,
+            "reply": "Handled custom",
+        }
 
     # Verify custom_handoff matches HandoffFn protocol
     assert isinstance(custom_handoff, HandoffFn)
@@ -739,7 +820,9 @@ def test_handoff_fn_protocol_and_no_inspect(setup_ephemeral_db, monkeypatch: pyt
     assert "system_prompt" in received_args["context"]
 
 
-def test_context_sanitization_removes_private_and_non_serializable_objects(setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch):
+def test_context_sanitization_removes_private_and_non_serializable_objects(
+    setup_ephemeral_db, monkeypatch: pytest.MonkeyPatch
+):
     """Test PONTO 3: Verify sanitize_context strips '_' keys and non-JSON serializable objects from LLM messages."""
     from src.macro_agents.handoff import HandoffRuntime
 
@@ -769,7 +852,11 @@ def test_context_sanitization_removes_private_and_non_serializable_objects(setup
         mock_choice.message.tool_calls = None
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
-        mock_resp.usage.model_dump.return_value = {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}
+        mock_resp.usage.model_dump.return_value = {
+            "prompt_tokens": 10,
+            "completion_tokens": 10,
+            "total_tokens": 20,
+        }
         return mock_resp
 
     monkeypatch.setattr("litellm.completion", mock_completion)
@@ -826,6 +913,7 @@ def test_context_sanitization_removes_private_and_non_serializable_objects(setup
 def test_no_circular_import_between_indexer_and_router():
     """Test PONTO 1: Fresh import of indexer and semantic router without circular import errors."""
     import sys
+
     # Clear cached modules if any to simulate clean import
     for mod in ["src.catalog.indexer", "src.router.semantic", "src.catalog.embeddings"]:
         sys.modules.pop(mod, None)
@@ -839,7 +927,9 @@ def test_no_circular_import_between_indexer_and_router():
     assert hasattr(router_mod, "route_agent")
 
 
-def test_agency_embeddings_hash_indexes_and_routes_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_agency_embeddings_hash_indexes_and_routes_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Test PONTO 2: AGENCY_EMBEDDINGS=hash indexes and routes completely offline."""
     from src.catalog.embeddings import get_embedding_function
     from src.catalog.indexer import run_indexing
@@ -881,7 +971,9 @@ def test_agency_embeddings_hash_indexes_and_routes_offline(tmp_path: Path, monke
     assert res.agent_id == "vulcan"
 
 
-def test_local_embeddings_fallback_to_hash_when_missing(monkeypatch: pytest.MonkeyPatch):
+def test_local_embeddings_fallback_to_hash_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Test PONTO 2: When AGENCY_EMBEDDINGS=local but sentence-transformers is missing, fall back to hash."""
     import builtins
     from src.catalog.embeddings import get_embedding_function
@@ -901,7 +993,9 @@ def test_local_embeddings_fallback_to_hash_when_missing(monkeypatch: pytest.Monk
     assert embed_fn.backend_name == "hash"
 
 
-def test_embedding_backend_mismatch_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_embedding_backend_mismatch_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Test PONTO 2: Mismatch between index metadata and current router embedding produces reindex warning."""
     import logging
     from src.catalog.embeddings import (
@@ -929,12 +1023,16 @@ def test_embedding_backend_mismatch_warning(tmp_path: Path, monkeypatch: pytest.
     assert "hash" in warn_msg
 
 
-def test_gateway_models_configurable_base_url_and_api_key(monkeypatch: pytest.MonkeyPatch):
+def test_gateway_models_configurable_base_url_and_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Test PONTO 3: Models registry respects AGENCY_LLM_BASE_URL and AGENCY_LLM_API_KEY with aliases."""
     from src.gateway.models import _gateway_base, _gateway_key, resolve_model
 
     # Custom agency env vars
-    monkeypatch.setenv("AGENCY_LLM_BASE_URL", "https://custom-gateway.openai.azure.com/v1")
+    monkeypatch.setenv(
+        "AGENCY_LLM_BASE_URL", "https://custom-gateway.openai.azure.com/v1"
+    )
     monkeypatch.setenv("AGENCY_LLM_API_KEY", "secret-test-key-12345")
 
     assert _gateway_base() == "https://custom-gateway.openai.azure.com/v1"
@@ -974,13 +1072,17 @@ def test_check_gateway_health_offline(monkeypatch: pytest.MonkeyPatch):
     from src.gateway.models import check_gateway_health
 
     # Point to an unreachable port / offline host with short timeout
-    is_ok, msg, models = check_gateway_health(base_url="http://127.0.0.1:59999/v1", timeout=0.5)
+    is_ok, msg, models = check_gateway_health(
+        base_url="http://127.0.0.1:59999/v1", timeout=0.5
+    )
     assert is_ok is False
     assert "indisponível" in msg or "indisponivel" in msg or "127.0.0.1:59999" in msg
     assert models == []
 
 
-def test_doctor_command_runs_cleanly(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
+def test_doctor_command_runs_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+):
     """Test PONTO 3: 'aggency doctor' diagnostic tool runs completely without unhandled exceptions."""
     from src.cli.doctor import run_doctor
 
@@ -997,9 +1099,3 @@ def test_doctor_command_runs_cleanly(monkeypatch: pytest.MonkeyPatch, capsys: py
     # Ensure raw secret key is NEVER printed in plain text
     assert "test-secret-key-abcdef" not in captured.out
     assert "masked" in captured.out
-
-
-
-
-
-

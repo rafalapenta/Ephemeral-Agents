@@ -41,7 +41,13 @@ def test_env(tmp_path: Path):
             macro_domain="engineering",
             name="Vulcan",
             system_prompt_path="vulcan/SOUL.md",
-            trigger_hooks=["software engineering", "devops", "testes unitarios", "arquitetura", "playwright"],
+            trigger_hooks=[
+                "software engineering",
+                "devops",
+                "testes unitarios",
+                "arquitetura",
+                "playwright",
+            ],
             is_active=True,
         )
         lyra = Agent(
@@ -79,7 +85,9 @@ def test_env(tmp_path: Path):
     }
 
 
-def test_end_to_end_skill_escalation_and_unblocking(test_env, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_end_to_end_skill_escalation_and_unblocking(
+    test_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test full cycle: Task blocked due to missing skill -> Lyra subtask -> on_skill_discovered -> unblock to READY -> Fast Path."""
     db_url = test_env["db_url"]
     state_dir = test_env["state_dir"]
@@ -133,7 +141,10 @@ def test_end_to_end_skill_escalation_and_unblocking(test_env, monkeypatch: pytes
     assert lyra_subtask.assignee == "lyra"
     assert lyra_subtask.macro_domain == "research"
     assert lyra_subtask.parent_task_id == main_task.task_id
-    assert "Pesquisar no skills.sh especificação homologada para: Automação de testes end-to-end com Playwright" in lyra_subtask.title
+    assert (
+        "Pesquisar no skills.sh especificação homologada para: Automação de testes end-to-end com Playwright"
+        in lyra_subtask.title
+    )
 
     # 2. Simulate Lyra discovering the skill from skills.sh
     discovered_skill_md = """---
@@ -156,7 +167,9 @@ Automação e execução autônoma de testes de interface com Playwright.
     # Verify skill is persisted in the database and linked to Vulcan
     engine = create_engine(db_url)
     with Session(engine) as session:
-        stored_skill = session.scalar(select(SkillCatalog).where(SkillCatalog.id == "playwright-runner"))
+        stored_skill = session.scalar(
+            select(SkillCatalog).where(SkillCatalog.id == "playwright-runner")
+        )
         assert stored_skill is not None
         assert stored_skill.source == "skills.sh"
 
@@ -181,7 +194,9 @@ Automação e execução autônoma de testes de interface com Playwright.
     assert main_task.status == KanbanStatus.DONE
 
 
-def test_fast_path_when_adherence_is_high(test_env, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fast_path_when_adherence_is_high(
+    test_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test Fast-Path execution when skill adherence is >= 0.72 from the start."""
     db_url = test_env["db_url"]
     state_dir = test_env["state_dir"]
@@ -245,5 +260,7 @@ def test_inject_ephemeral_skill_budget_truncation() -> None:
     assert "ephemeral_skill" in injected
     assert injected["ephemeral_skill"]["id"] == "massive-skill"
     assert len(injected["ephemeral_skill"]["content_md"]) <= 450
-    assert "[truncated to fit token_budget]" in injected["ephemeral_skill"]["content_md"]
+    assert (
+        "[truncated to fit token_budget]" in injected["ephemeral_skill"]["content_md"]
+    )
     assert "## Ephemeral Skill: Massive Skill" in injected["system_prompt"]

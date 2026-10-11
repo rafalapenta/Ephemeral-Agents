@@ -25,11 +25,13 @@ Configuration (all optional, env-driven)
 ``AGENT_MODEL_TIER``     ``reliable`` (default) | ``premium`` | ``fast``
 ``HANDOFF_TIMEOUT_SECONDS``  per-request timeout, default 120
 """
+
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,19 +43,41 @@ _DEFAULT_AGENT = "general"
 # EXAMPLE reference pricing table for cost estimation when litellm.completion_cost
 # is unavailable or unmapped on gateway endpoints. Clearly marked as example pricing.
 EXAMPLE_FALLBACK_PRICING: dict[str, dict[str, float]] = {
-    "mistral/ministral-8b-latest": {"input_usd_per_1k": 0.0001, "output_usd_per_1k": 0.0001},
-    "mistral/ministral-14b-latest": {"input_usd_per_1k": 0.0002, "output_usd_per_1k": 0.0002},
-    "mistral/codestral-latest": {"input_usd_per_1k": 0.0003, "output_usd_per_1k": 0.0009},
-    "mistral/mistral-code-latest": {"input_usd_per_1k": 0.0003, "output_usd_per_1k": 0.0009},
-    "mistral/magistral-medium-latest": {"input_usd_per_1k": 0.0020, "output_usd_per_1k": 0.0060},
-    "mistral/mistral-medium-latest": {"input_usd_per_1k": 0.0020, "output_usd_per_1k": 0.0060},
+    "mistral/ministral-8b-latest": {
+        "input_usd_per_1k": 0.0001,
+        "output_usd_per_1k": 0.0001,
+    },
+    "mistral/ministral-14b-latest": {
+        "input_usd_per_1k": 0.0002,
+        "output_usd_per_1k": 0.0002,
+    },
+    "mistral/codestral-latest": {
+        "input_usd_per_1k": 0.0003,
+        "output_usd_per_1k": 0.0009,
+    },
+    "mistral/mistral-code-latest": {
+        "input_usd_per_1k": 0.0003,
+        "output_usd_per_1k": 0.0009,
+    },
+    "mistral/magistral-medium-latest": {
+        "input_usd_per_1k": 0.0020,
+        "output_usd_per_1k": 0.0060,
+    },
+    "mistral/mistral-medium-latest": {
+        "input_usd_per_1k": 0.0020,
+        "output_usd_per_1k": 0.0060,
+    },
     "gpt-4o-mini": {"input_usd_per_1k": 0.00015, "output_usd_per_1k": 0.0006},
     "gpt-4o": {"input_usd_per_1k": 0.0025, "output_usd_per_1k": 0.0100},
 }
 
 # Conservative default prices if model is not found in fallback table
-DEFAULT_FALLBACK_INPUT_USD_PER_1K = float(os.getenv("DEFAULT_FALLBACK_INPUT_USD_PER_1K", "0.0015"))
-DEFAULT_FALLBACK_OUTPUT_USD_PER_1K = float(os.getenv("DEFAULT_FALLBACK_OUTPUT_USD_PER_1K", "0.0060"))
+DEFAULT_FALLBACK_INPUT_USD_PER_1K = float(
+    os.getenv("DEFAULT_FALLBACK_INPUT_USD_PER_1K", "0.0015")
+)
+DEFAULT_FALLBACK_OUTPUT_USD_PER_1K = float(
+    os.getenv("DEFAULT_FALLBACK_OUTPUT_USD_PER_1K", "0.0060")
+)
 
 _WARNED_UNKNOWN_MODELS: set[str] = set()
 
@@ -65,12 +89,12 @@ def estimate_cost(
     completion_response: Any | None = None,
 ) -> tuple[float, str]:
     """Estimate token cost in USD with progressive fallbacks.
-    
+
     Order of precedence:
     1. litellm.completion_cost()
     2. Fallback pricing table (EXAMPLE_FALLBACK_PRICING or env overrides)
     3. Conservative default estimate (logs warning once per model)
-    
+
     Returns:
         tuple[float, str]: (calculated_cost_usd, cost_source)
         where cost_source is one of: "litellm", "fallback_table", "default_estimate"
@@ -80,7 +104,9 @@ def estimate_cost(
     # 1. Try LiteLLM completion_cost first
     if completion_response is not None:
         try:
-            litellm_cost = float(litellm.completion_cost(completion_response=completion_response) or 0.0)
+            litellm_cost = float(
+                litellm.completion_cost(completion_response=completion_response) or 0.0
+            )
             if litellm_cost > 0.0:
                 return round(litellm_cost, 6), "litellm"
         except Exception:
@@ -89,14 +115,22 @@ def estimate_cost(
     # 2. Try LiteLLM cost_per_token or completion_cost by model if model name provided
     clean_model = (model or "").strip()
     if clean_model.startswith("openai/"):
-        clean_model = clean_model[len("openai/"):]
+        clean_model = clean_model[len("openai/") :]
 
     # Check fallback table
-    pricing = EXAMPLE_FALLBACK_PRICING.get(clean_model) or EXAMPLE_FALLBACK_PRICING.get(model or "")
+    pricing = EXAMPLE_FALLBACK_PRICING.get(clean_model) or EXAMPLE_FALLBACK_PRICING.get(
+        model or ""
+    )
     if pricing is not None:
-        in_rate = float(pricing.get("input_usd_per_1k", DEFAULT_FALLBACK_INPUT_USD_PER_1K))
-        out_rate = float(pricing.get("output_usd_per_1k", DEFAULT_FALLBACK_OUTPUT_USD_PER_1K))
-        cost = (prompt_tokens / 1000.0) * in_rate + (completion_tokens / 1000.0) * out_rate
+        in_rate = float(
+            pricing.get("input_usd_per_1k", DEFAULT_FALLBACK_INPUT_USD_PER_1K)
+        )
+        out_rate = float(
+            pricing.get("output_usd_per_1k", DEFAULT_FALLBACK_OUTPUT_USD_PER_1K)
+        )
+        cost = (prompt_tokens / 1000.0) * in_rate + (
+            completion_tokens / 1000.0
+        ) * out_rate
         return round(cost, 6), "fallback_table"
 
     # 3. Conservative default estimate
@@ -110,9 +144,10 @@ def estimate_cost(
         )
         _WARNED_UNKNOWN_MODELS.add(model_key)
 
-    cost = (prompt_tokens / 1000.0) * DEFAULT_FALLBACK_INPUT_USD_PER_1K + (completion_tokens / 1000.0) * DEFAULT_FALLBACK_OUTPUT_USD_PER_1K
+    cost = (prompt_tokens / 1000.0) * DEFAULT_FALLBACK_INPUT_USD_PER_1K + (
+        completion_tokens / 1000.0
+    ) * DEFAULT_FALLBACK_OUTPUT_USD_PER_1K
     return round(cost, 6), "default_estimate"
-
 
 
 @dataclass(frozen=True)
@@ -131,7 +166,7 @@ class ResolvedModel:
     """A ready-to-send LiteLLM target for one agent."""
 
     agent_id: str
-    model: str            # LiteLLM-addressable string, e.g. "openai/mistral/codestral-latest"
+    model: str  # LiteLLM-addressable string, e.g. "openai/mistral/codestral-latest"
     api_base: str
     api_key: str
     temperature: float
@@ -154,36 +189,71 @@ class ResolvedModel:
 
 AGENT_MODELS: dict[str, list[ModelChoice]] = {
     "atlas": [
-        ModelChoice("mistral/ministral-14b-latest", "reliable", 0.2, 4096,
-                    "orchestration / routing"),
+        ModelChoice(
+            "mistral/ministral-14b-latest",
+            "reliable",
+            0.2,
+            4096,
+            "orchestration / routing",
+        ),
         ModelChoice("mistral/ministral-8b-latest", "fast", 0.2, 4096),
     ],
     "vulcan": [
-        ModelChoice("mistral/codestral-latest", "reliable", 0.1, 8192,
-                    "code specialist: architecture, TDD, refactors"),
+        ModelChoice(
+            "mistral/codestral-latest",
+            "reliable",
+            0.1,
+            8192,
+            "code specialist: architecture, TDD, refactors",
+        ),
         ModelChoice("mistral/mistral-code-latest", "reliable", 0.1, 8192),
         ModelChoice("mistral/ministral-14b-latest", "reliable", 0.1, 4096),
     ],
     "lyra": [
-        ModelChoice("mistral/ministral-14b-latest", "reliable", 0.2, 8192,
-                    "evidence-first research & synthesis"),
-        ModelChoice("mistral/magistral-medium-latest", "premium", 0.2, 8192,
-                    "true reasoning tier — 429 without gateway credits"),
+        ModelChoice(
+            "mistral/ministral-14b-latest",
+            "reliable",
+            0.2,
+            8192,
+            "evidence-first research & synthesis",
+        ),
+        ModelChoice(
+            "mistral/magistral-medium-latest",
+            "premium",
+            0.2,
+            8192,
+            "true reasoning tier — 429 without gateway credits",
+        ),
         ModelChoice("mistral/ministral-8b-latest", "fast", 0.2, 4096),
     ],
     "aura": [
-        ModelChoice("mistral/ministral-14b-latest", "reliable", 0.4, 4096,
-                    "product specs & UX copy"),
+        ModelChoice(
+            "mistral/ministral-14b-latest",
+            "reliable",
+            0.4,
+            4096,
+            "product specs & UX copy",
+        ),
         ModelChoice("mistral/ministral-8b-latest", "fast", 0.4, 4096),
     ],
     "sterling": [
-        ModelChoice("mistral/ministral-8b-latest", "fast", 0.2, 4096,
-                    "fast + cost-effective for FP&A / operations"),
+        ModelChoice(
+            "mistral/ministral-8b-latest",
+            "fast",
+            0.2,
+            4096,
+            "fast + cost-effective for FP&A / operations",
+        ),
         ModelChoice("mistral/ministral-14b-latest", "reliable", 0.2, 4096),
     ],
     "vesper": [
-        ModelChoice("mistral/ministral-8b-latest", "fast", 0.5, 4096,
-                    "high-volume marketing & growth copy"),
+        ModelChoice(
+            "mistral/ministral-8b-latest",
+            "fast",
+            0.5,
+            4096,
+            "high-volume marketing & growth copy",
+        ),
         ModelChoice("mistral/ministral-14b-latest", "reliable", 0.5, 4096),
     ],
 }
@@ -259,12 +329,22 @@ def check_gateway_health(
                 body = response.read().decode("utf-8")
                 data = json.loads(body)
                 models = []
-                if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
-                    models = [m.get("id", "") for m in data["data"] if isinstance(m, dict)]
+                if (
+                    isinstance(data, dict)
+                    and "data" in data
+                    and isinstance(data["data"], list)
+                ):
+                    models = [
+                        m.get("id", "") for m in data["data"] if isinstance(m, dict)
+                    ]
                 elif isinstance(data, list):
                     models = [m.get("id", "") for m in data if isinstance(m, dict)]
                 return True, f"LLM gateway operacional em {url}", models
-            return False, f"LLM gateway retornou status {response.status} em {models_url}", []
+            return (
+                False,
+                f"LLM gateway retornou status {response.status} em {models_url}",
+                [],
+            )
     except Exception as exc:
         msg = f"LLM gateway indisponível em {url}; diretores não vão responder"
         logger.warning(msg)
@@ -285,12 +365,24 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
     if agent == "ephemeral":
         ephemeral_override = os.environ.get("AGENCY_EPHEMERAL_MODEL")
         if ephemeral_override:
-            choice = ModelChoice(ephemeral_override, "fast", 0.2, 2048, "AGENCY_EPHEMERAL_MODEL env override")
+            choice = ModelChoice(
+                ephemeral_override,
+                "fast",
+                0.2,
+                2048,
+                "AGENCY_EPHEMERAL_MODEL env override",
+            )
             chain = [choice]
             source = "ephemeral-env"
         else:
             chain = [
-                ModelChoice("mistral/ministral-8b-latest", "fast", 0.2, 2048, "cheapest default model for ephemeral subagents"),
+                ModelChoice(
+                    "mistral/ministral-8b-latest",
+                    "fast",
+                    0.2,
+                    2048,
+                    "cheapest default model for ephemeral subagents",
+                ),
                 ModelChoice("mistral/ministral-14b-latest", "reliable", 0.2, 2048),
             ]
             source = "ephemeral-default"
@@ -298,7 +390,9 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
         # 2. Hard per-agent override wins over everything.
         override = os.environ.get(f"AGENT_MODEL_{agent.upper()}")
         if override:
-            choice = ModelChoice(override, "override", 0.2, 4096, "AGENT_MODEL_* env override")
+            choice = ModelChoice(
+                override, "override", 0.2, 4096, "AGENT_MODEL_* env override"
+            )
             chain = [choice]
             source = "env-override"
         else:
@@ -306,7 +400,11 @@ def resolve_model(agent_id: str | None) -> ResolvedModel:
             source = "registry"
 
         if not chain:
-            chain = [ModelChoice("mistral/ministral-8b-latest", "reliable", 0.2, 4096, "default")]
+            chain = [
+                ModelChoice(
+                    "mistral/ministral-8b-latest", "reliable", 0.2, 4096, "default"
+                )
+            ]
 
         # 3. Optional tier promotion.
         if os.environ.get("AGENT_MODEL_TIER", "reliable").lower() == "premium":
@@ -340,14 +438,18 @@ def describe_matrix() -> list[dict[str, str]]:
         for agent, chain in sorted(AGENT_MODELS.items())
     ]
     # Add ephemeral default configuration
-    ephemeral_model = os.environ.get("AGENCY_EPHEMERAL_MODEL", "mistral/ministral-8b-latest")
-    matrix.append({
-        "agent": "ephemeral (subagent)",
-        "primary": ephemeral_model,
-        "tier": "fast (cheapest/free)",
-        "fallback": "mistral/ministral-14b-latest",
-        "rationale": "isolated ephemeral skills execution (max_depth=1)",
-    })
+    ephemeral_model = os.environ.get(
+        "AGENCY_EPHEMERAL_MODEL", "mistral/ministral-8b-latest"
+    )
+    matrix.append(
+        {
+            "agent": "ephemeral (subagent)",
+            "primary": ephemeral_model,
+            "tier": "fast (cheapest/free)",
+            "fallback": "mistral/ministral-14b-latest",
+            "rationale": "isolated ephemeral skills execution (max_depth=1)",
+        }
+    )
     return matrix
 
 

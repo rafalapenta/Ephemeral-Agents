@@ -1,2 +1,1 @@
-"""Evals package for regression and safety testing.
-"""
+"""Evals package for regression and safety testing."""

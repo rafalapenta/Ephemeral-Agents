@@ -1,4 +1,5 @@
 """Main CLI dispatcher for AGency (`aggency`)."""
+
 from __future__ import annotations
 
 import sys
@@ -10,7 +11,9 @@ def main() -> None:
         print("Usage: aggency <command> [options]")
         print()
         print("Commands:")
-        print("  doctor      Run system diagnostics (embeddings, index, LLM gateway, models)")
+        print(
+            "  doctor      Run system diagnostics (embeddings, index, LLM gateway, models)"
+        )
         print("  index       Discover and index agent catalog")
         print("  mcp         Start MCP server")
         print("  scheduler   Run autonomous scheduler")
@@ -19,17 +22,21 @@ def main() -> None:
     cmd = args[0].lower()
     if cmd == "doctor":
         from src.cli.doctor import run_doctor
+
         sys.exit(run_doctor())
     elif cmd == "index":
         from src.catalog.indexer import main as indexer_main
+
         sys.argv = [sys.argv[0]] + args[1:]
         indexer_main()
     elif cmd == "mcp":
         from src.mcp_servers.server import main as mcp_main
+
         sys.argv = [sys.argv[0]] + args[1:]
         mcp_main()
     elif cmd == "scheduler":
         from src.scheduler.runner import main as scheduler_main
+
         sys.argv = [sys.argv[0]] + args[1:]
         scheduler_main()
     else:

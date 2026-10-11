@@ -7,6 +7,7 @@ Covers:
   - Kanban state machine (transitions, audit)
   - Domain tie-breaking in router
 """
+
 from __future__ import annotations
 
 import json
@@ -324,12 +325,14 @@ class TestKanbanBoard:
 class TestDomainPriority:
     def test_priority_order_defined(self):
         from src.router.semantic import DOMAIN_PRIORITY
-        assert DOMAIN_PRIORITY['engineering'] < DOMAIN_PRIORITY['operations']
-        assert DOMAIN_PRIORITY['operations'] < DOMAIN_PRIORITY['business']
-        assert DOMAIN_PRIORITY['business'] < DOMAIN_PRIORITY['research']
-        assert DOMAIN_PRIORITY['research'] < DOMAIN_PRIORITY['governance']
+
+        assert DOMAIN_PRIORITY["engineering"] < DOMAIN_PRIORITY["operations"]
+        assert DOMAIN_PRIORITY["operations"] < DOMAIN_PRIORITY["business"]
+        assert DOMAIN_PRIORITY["business"] < DOMAIN_PRIORITY["research"]
+        assert DOMAIN_PRIORITY["research"] < DOMAIN_PRIORITY["governance"]
 
     def test_all_five_domains_present(self):
         from src.router.semantic import DOMAIN_PRIORITY
-        expected = {'engineering', 'operations', 'business', 'research', 'governance'}
+
+        expected = {"engineering", "operations", "business", "research", "governance"}
         assert set(DOMAIN_PRIORITY.keys()) == expected

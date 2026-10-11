@@ -8,6 +8,7 @@ Verifies:
 
 Security: Never prints secret keys or tokens.
 """
+
 from __future__ import annotations
 
 import os
@@ -48,10 +49,13 @@ def run_doctor() -> int:
     if backend == "local":
         try:
             import sentence_transformers  # noqa: F401
+
             print("  Status: [OK] sentence-transformers is installed.")
         except ImportError:
-            print("  Status: [WARN] sentence-transformers not installed; falling back to 'hash'.")
-            print("          Install with: pip install \"aggency[local-embeddings]\"")
+            print(
+                "  Status: [WARN] sentence-transformers not installed; falling back to 'hash'."
+            )
+            print('          Install with: pip install "aggency[local-embeddings]"')
             has_warnings = True
     elif backend == "hash":
         print("  Status: [OK] Hash embeddings (offline / deterministic mode).")
@@ -73,7 +77,9 @@ def run_doctor() -> int:
     # Check embedding compatibility
     compatible, compat_msg = check_embedding_compatibility(chroma_dir, fn)
     if compatible:
-        print(f"  Index Check: [OK] {compat_msg or 'Catalog embedding configuration is compatible'}")
+        print(
+            f"  Index Check: [OK] {compat_msg or 'Catalog embedding configuration is compatible'}"
+        )
     else:
         print(f"  Index Check: [WARN] {compat_msg}")
         print("               Please re-index with: aggency-index --reindex")
@@ -82,16 +88,23 @@ def run_doctor() -> int:
     # Check vector count
     try:
         import chromadb
+
         if Path(chroma_dir).exists():
             client = chromadb.PersistentClient(path=str(chroma_dir))
             try:
                 coll = client.get_collection("agency_agents")
                 count = coll.count()
-                print(f"  Vectors:     [OK] {count} agents indexed in Chroma collection 'agency_agents'")
+                print(
+                    f"  Vectors:     [OK] {count} agents indexed in Chroma collection 'agency_agents'"
+                )
             except Exception:
-                print("  Vectors:     [INFO] Collection 'agency_agents' not found yet (run aggency-index)")
+                print(
+                    "  Vectors:     [INFO] Collection 'agency_agents' not found yet (run aggency-index)"
+                )
         else:
-            print("  Vectors:     [INFO] Chroma directory does not exist yet (run aggency-index)")
+            print(
+                "  Vectors:     [INFO] Chroma directory does not exist yet (run aggency-index)"
+            )
     except Exception as exc:
         print(f"  Vectors:     [WARN] Could not inspect ChromaDB: {exc}")
         has_warnings = True
@@ -101,7 +114,11 @@ def run_doctor() -> int:
     print("[3/4] LLM Gateway & API Health Check")
     base_url = _gateway_base()
     raw_key = _gateway_key()
-    key_display = "[SET] (masked: " + ("*" * 6) + raw_key[-4:] + ")" if len(raw_key) >= 4 else ("[SET] (masked: ***)" if raw_key else "[NOT SET] (open gateway mode)")
+    key_display = (
+        "[SET] (masked: " + ("*" * 6) + raw_key[-4:] + ")"
+        if len(raw_key) >= 4
+        else ("[SET] (masked: ***)" if raw_key else "[NOT SET] (open gateway mode)")
+    )
 
     print(f"  Base URL:  {base_url}")
     print(f"  API Key:   {key_display}")
@@ -110,10 +127,14 @@ def run_doctor() -> int:
     if is_healthy:
         print(f"  Status:    [OK] {health_msg}")
         if available_models:
-            print(f"  Models:    {len(available_models)} models discovered ({', '.join(available_models[:4])}...)")
+            print(
+                f"  Models:    {len(available_models)} models discovered ({', '.join(available_models[:4])}...)"
+            )
     else:
         print(f"  Status:    [WARN] {health_msg}")
-        print("             (Diretores e LLM handoff não vão responder enquanto o gateway estiver fora)")
+        print(
+            "             (Diretores e LLM handoff não vão responder enquanto o gateway estiver fora)"
+        )
         has_warnings = True
     print()
 
@@ -123,7 +144,9 @@ def run_doctor() -> int:
     print(f"  {'Agent':<22} | {'Tier':<22} | {'Primary Model':<30} | {'Fallback':<25}")
     print("  " + "-" * 105)
     for entry in matrix:
-        print(f"  {entry['agent']:<22} | {entry['tier']:<22} | {entry['primary']:<30} | {entry['fallback']:<25}")
+        print(
+            f"  {entry['agent']:<22} | {entry['tier']:<22} | {entry['primary']:<30} | {entry['fallback']:<25}"
+        )
     print()
 
     print("=" * 60)

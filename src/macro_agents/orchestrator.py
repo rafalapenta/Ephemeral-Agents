@@ -12,6 +12,7 @@ Executes the full lifecycle of a task across the AGgency pipeline:
 
 Each step is idempotent and auditable via the journal.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Quality Gate definitions ───────────────────────────────────
+
 
 @dataclass
 class GateResult:
@@ -135,7 +137,6 @@ class OrchestrationResult:
         }
 
 
-
 def _post_task_telemetry(
     task: Any,
     result: Any,
@@ -172,13 +173,17 @@ def _post_task_telemetry(
     if not human_corrected and hasattr(task, "audit_trail"):
         for entry in getattr(task, "audit_trail", []):
             actor = str(getattr(entry, "actor", "")).lower()
-            if actor in ("human", "user", "admin", "operator") or getattr(entry, "human_corrected", False):
+            if actor in ("human", "user", "admin", "operator") or getattr(
+                entry, "human_corrected", False
+            ):
                 human_corrected = True
                 break
 
     # Cost report resolution
     cost_report = {}
-    if hasattr(result, "handoff_result") and isinstance(getattr(result, "handoff_result"), dict):
+    if hasattr(result, "handoff_result") and isinstance(
+        getattr(result, "handoff_result"), dict
+    ):
         cost_report = result.handoff_result.get("cost_report", {})
     if not cost_report:
         cost_report = get_cost_report(str(task_id))
@@ -186,7 +191,11 @@ def _post_task_telemetry(
     tokens = cost_report.get("total_tokens", 0)
     if not tokens:
         tokens = getattr(result, "tokens", 0) or 0
-        if not tokens and hasattr(result, "skill_match") and getattr(result.skill_match, "skill", None):
+        if (
+            not tokens
+            and hasattr(result, "skill_match")
+            and getattr(result.skill_match, "skill", None)
+        ):
             tokens = getattr(result.skill_match.skill, "token_budget", 0) or 0
 
     cost_usd = cost_report.get("total_cost_usd", 0.0)
@@ -211,6 +220,7 @@ def _post_task_telemetry(
 
 
 # ── Orchestrator ──────────────────────────────────────────────
+
 
 class MacroOrchestrator:
     """Coordinates the full task lifecycle across the AGgency pipeline.
@@ -258,6 +268,7 @@ class MacroOrchestrator:
         # Check LLM gateway health on initialization (non-blocking warning if offline)
         if not dry_run and self.handoff_fn is not None:
             from src.gateway.models import check_gateway_health
+
             is_ok, msg, _ = check_gateway_health(timeout=3.0)
             if not is_ok:
                 logger.warning(msg)
@@ -391,9 +402,13 @@ class MacroOrchestrator:
 
             # Case A: Adherence >= 0.72 -> Fast Path
             if task.status == KanbanStatus.TODO:
-                self.board.transition(task.task_id, KanbanStatus.READY, actor="orchestrator")
+                self.board.transition(
+                    task.task_id, KanbanStatus.READY, actor="orchestrator"
+                )
             if task.status == KanbanStatus.READY:
-                self.board.transition(task.task_id, KanbanStatus.IN_PROGRESS, actor="orchestrator")
+                self.board.transition(
+                    task.task_id, KanbanStatus.IN_PROGRESS, actor="orchestrator"
+                )
 
             # Compress context and inject ephemeral skill
             handoff_context = {
@@ -434,7 +449,9 @@ class MacroOrchestrator:
 
             # Handoff (clean context without internal runtime objects)
             if self.handoff_fn is not None:
-                handoff_result = self.handoff_fn(task, route_result, compressed, runtime=runtime)
+                handoff_result = self.handoff_fn(
+                    task, route_result, compressed, runtime=runtime
+                )
             else:
                 handoff_result = {
                     "status": "simulated",
@@ -445,7 +462,12 @@ class MacroOrchestrator:
             if handoff_result.get("status") == "limit_exceeded":
                 if task.status != KanbanStatus.BLOCKED:
                     try:
-                        self.board.transition(task.task_id, KanbanStatus.BLOCKED, actor="governance", reason="limit_exceeded")
+                        self.board.transition(
+                            task.task_id,
+                            KanbanStatus.BLOCKED,
+                            actor="governance",
+                            reason="limit_exceeded",
+                        )
                     except Exception:
                         pass
                 task.blocked_reason = "limit_exceeded"
@@ -480,8 +502,10 @@ class MacroOrchestrator:
                 source="orchestrator",
             )
 
-            self.board.transition(task.task_id, KanbanStatus.REVIEW, actor="orchestrator")
-            
+            self.board.transition(
+                task.task_id, KanbanStatus.REVIEW, actor="orchestrator"
+            )
+
             # Post comment to Linear
             if not getattr(self, "dry_run", False):
                 try:
@@ -492,13 +516,18 @@ class MacroOrchestrator:
                             f"{handoff_result.get('reply', 'No reply content.')}"
                         )
                     else:
-                        error_msg = handoff_result.get('error', 'Unknown error')
+                        error_msg = handoff_result.get("error", "Unknown error")
                         comment_body = f"⚠️ **Task execution failed:** {error_msg}\n\nPlease check the agent logs and `.env` credentials."
                     linear.add_comment(task.task_id, comment_body)
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"Failed to post comment to Linear: {e}")
 
-            self.board.transition(task.task_id, KanbanStatus.DONE, actor="orchestrator", reason="handoff completed")
+            self.board.transition(
+                task.task_id,
+                KanbanStatus.DONE,
+                actor="orchestrator",
+                reason="handoff completed",
+            )
 
             current_state = self.state.get()
             version_ok = current_state.get("state_version", 0) > 0
@@ -537,11 +566,14 @@ class MacroOrchestrator:
         journal_path: Path | str = Path("data/journal.jsonl"),
     ) -> dict[str, Any]:
         """Post-execution telemetry hook recorded in data/journal.jsonl."""
-        return _post_task_telemetry(task, result, latency_ms=latency_ms, journal_path=journal_path)
+        return _post_task_telemetry(
+            task, result, latency_ms=latency_ms, journal_path=journal_path
+        )
 
     def get_cost_report(self, task_id: str) -> dict[str, Any]:
         """Query task cost, tokens, and ephemeral stats for Sterling governance."""
         from src.governance.limits import get_cost_report
+
         return get_cost_report(task_id)
 
     def on_skill_discovered(
@@ -564,6 +596,7 @@ class MacroOrchestrator:
         if "---" in skill_md:
             try:
                 import yaml
+
                 parts = skill_md.split("---", 2)
                 if len(parts) >= 3:
                     meta = yaml.safe_load(parts[1]) or {}
@@ -583,7 +616,9 @@ class MacroOrchestrator:
         engine = create_engine(db_url)
         Base.metadata.create_all(engine)
         with Session(engine, expire_on_commit=False) as session:
-            existing_skill = session.scalar(select(SkillCatalog).where(SkillCatalog.id == final_id))
+            existing_skill = session.scalar(
+                select(SkillCatalog).where(SkillCatalog.id == final_id)
+            )
             if existing_skill:
                 existing_skill.name = final_name
                 existing_skill.description = final_desc
@@ -670,7 +705,9 @@ class MacroOrchestrator:
             task_title = task_data.get("title") or title or "Untitled Task"
             task_body = task_data.get("description") or task_data.get("body", body)
             task_priority = task_data.get("priority", priority)
-            task_assignee = task_data.get("expected_director") or task_data.get("assignee", assignee)
+            task_assignee = task_data.get("expected_director") or task_data.get(
+                "assignee", assignee
+            )
             task_query = task_data.get("query") or task_data.get("prompt") or query
             task_source = task_data.get("source_agent", source_agent)
             task = KanbanTask(
@@ -680,7 +717,9 @@ class MacroOrchestrator:
                 assignee=task_assignee,
             )
             self.board.add(task)
-            return self.orchestrate_task(task, source_agent=task_source, query=task_query)
+            return self.orchestrate_task(
+                task, source_agent=task_source, query=task_query
+            )
 
         task_title = title or "Untitled Task"
         task = KanbanTask(
@@ -691,4 +730,3 @@ class MacroOrchestrator:
         )
         self.board.add(task)
         return self.orchestrate_task(task, source_agent=source_agent, query=query)
-

@@ -43,7 +43,9 @@ def _create_agent(session: Session, agent_id: str, name: str, domain: str) -> Ag
     return agent
 
 
-def test_skill_catalog_and_director_skill_insertion_and_defaults(db_session: Session) -> None:
+def test_skill_catalog_and_director_skill_insertion_and_defaults(
+    db_session: Session,
+) -> None:
     """Test inserting SkillCatalog and DirectorSkill and verify default values and relationships."""
     agent = _create_agent(db_session, "vulcan", "Vulcan", "engineering")
 
@@ -66,7 +68,9 @@ def test_skill_catalog_and_director_skill_insertion_and_defaults(db_session: Ses
     db_session.add(link)
     db_session.commit()
 
-    stored_skill = db_session.scalar(select(SkillCatalog).where(SkillCatalog.id == "pytest-runner"))
+    stored_skill = db_session.scalar(
+        select(SkillCatalog).where(SkillCatalog.id == "pytest-runner")
+    )
     assert stored_skill is not None
     assert stored_skill.name == "Pytest Runner"
     assert stored_skill.description == "Executa testes unitários com pytest."
@@ -122,10 +126,27 @@ def test_filtered_query_by_director_id(db_session: Session) -> None:
     db_session.flush()
 
     links = [
-        DirectorSkill(director_id="vulcan", skill_id="pytest-runner", is_core=True, load_priority=1),
-        DirectorSkill(director_id="vulcan", skill_id="clean-architecture", is_core=True, load_priority=2),
-        DirectorSkill(director_id="aura", skill_id="pm-product-strategy", is_core=True, load_priority=1),
-        DirectorSkill(director_id="atlas", skill_id="wayfinder", is_core=True, load_priority=1),
+        DirectorSkill(
+            director_id="vulcan",
+            skill_id="pytest-runner",
+            is_core=True,
+            load_priority=1,
+        ),
+        DirectorSkill(
+            director_id="vulcan",
+            skill_id="clean-architecture",
+            is_core=True,
+            load_priority=2,
+        ),
+        DirectorSkill(
+            director_id="aura",
+            skill_id="pm-product-strategy",
+            is_core=True,
+            load_priority=1,
+        ),
+        DirectorSkill(
+            director_id="atlas", skill_id="wayfinder", is_core=True, load_priority=1
+        ),
     ]
     db_session.add_all(links)
     db_session.commit()
@@ -340,12 +361,16 @@ def test_seed_skills_catalog_populates_all_six_directors() -> None:
         directors = ["vulcan", "sterling", "aura", "vesper", "lyra", "atlas"]
         for director_id in directors:
             agent = session.scalar(select(Agent).where(Agent.agent_id == director_id))
-            assert agent is not None, f"Director {director_id} not found in agents table"
+            assert agent is not None, (
+                f"Director {director_id} not found in agents table"
+            )
 
             links = session.scalars(
                 select(DirectorSkill).where(DirectorSkill.director_id == director_id)
             ).all()
-            assert len(links) >= 5, f"Director {director_id} should have at least 5 skills"
+            assert len(links) >= 5, (
+                f"Director {director_id} should have at least 5 skills"
+            )
 
         # Verify idempotency
         second_run = seed_skills_catalog(engine=engine)
@@ -357,19 +382,21 @@ def test_seed_skills_catalog_with_custom_json(tmp_path: Path) -> None:
     """Test seed_skills_catalog loading ephemeral tools from a custom JSON file."""
     custom_json = tmp_path / "ephemeral_tools.json"
     custom_json.write_text(
-        json.dumps({
-            "version": "1.0.0",
-            "ephemeral_tools": [
-                {
-                    "tool_id": "custom-vulcan-profiler",
-                    "name": "Custom Vulcan Profiler",
-                    "description": "Profilagem avançada de CPU e memória.",
-                    "target_director": "vulcan",
-                    "trigger_keywords": ["profiler", "cpu", "memory"],
-                    "budget_tokens": 420,
-                }
-            ],
-        }),
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "ephemeral_tools": [
+                    {
+                        "tool_id": "custom-vulcan-profiler",
+                        "name": "Custom Vulcan Profiler",
+                        "description": "Profilagem avançada de CPU e memória.",
+                        "target_director": "vulcan",
+                        "trigger_keywords": ["profiler", "cpu", "memory"],
+                        "budget_tokens": 420,
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 

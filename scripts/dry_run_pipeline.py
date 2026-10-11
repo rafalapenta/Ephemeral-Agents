@@ -5,6 +5,7 @@ Valida em tempo real as 3 vias centrais do sistema:
 2. Slow-Path / Escalação (Aderência < 72% -> Bloqueio com MISSING_SKILL -> Sub-tarefa para Lyra -> Desbloqueio e Conclusão).
 3. Telemetria e Hot-Patch (Gravação no journal.jsonl e auditoria do SOUL.md).
 """
+
 import os
 import sys
 from pathlib import Path
@@ -35,10 +36,17 @@ def run_dry_run() -> None:
 
     from src.database.models import DirectorSkill, SkillCatalog
     from src.router.semantic import DEFAULT_DB_URL
+
     engine = create_engine(DEFAULT_DB_URL)
     with Session(engine) as session:
-        session.execute(delete(DirectorSkill).where(DirectorSkill.skill_id == "k8s-baremetal-migrator"))
-        session.execute(delete(SkillCatalog).where(SkillCatalog.id == "k8s-baremetal-migrator"))
+        session.execute(
+            delete(DirectorSkill).where(
+                DirectorSkill.skill_id == "k8s-baremetal-migrator"
+            )
+        )
+        session.execute(
+            delete(SkillCatalog).where(SkillCatalog.id == "k8s-baremetal-migrator")
+        )
         session.commit()
 
     # --- CENÁRIO A: FAST-PATH ---
@@ -50,7 +58,9 @@ def run_dry_run() -> None:
     }
     res_fast = orchestrator.orchestrate(task_fast)
     print(f"-> Diretor atribuído: {res_fast.get('director_id')}")
-    print(f"-> Skill resolvida: {res_fast.get('resolved_skill_id')} (Aderência: {res_fast.get('adherence_score', 0):.2%})")
+    print(
+        f"-> Skill resolvida: {res_fast.get('resolved_skill_id')} (Aderência: {res_fast.get('adherence_score', 0):.2%})"
+    )
     print(f"-> Status final Kanban: {res_fast.get('kanban_status')}")
 
     # --- CENÁRIO B: SLOW-PATH (ESCALAÇÃO) ---
@@ -64,7 +74,9 @@ def run_dry_run() -> None:
     print(f"-> Diretor atribuído: {res_slow.get('director_id')}")
     print(f"-> Aderência inicial: {res_slow.get('adherence_score', 0):.2%} (< 72%)")
     print(f"-> Status de bloqueio: {res_slow.get('blocked_reason')}")
-    print(f"-> Sub-tarefa despachada para Lyra: {res_slow.get('escalation_subtask_id')}")
+    print(
+        f"-> Sub-tarefa despachada para Lyra: {res_slow.get('escalation_subtask_id')}"
+    )
 
     # Simular Lyra descobrindo a skill no skills.sh e desbloqueando a tarefa
     print("-> [AÇÃO LYRA] Descobrindo e homologando skill via skills.sh...")
@@ -115,7 +127,9 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
         print("-> [AVISO] data/journal.jsonl ainda não criado.")
 
     # Validar Hot-patch cirúrgico no SOUL.md de Vulcan
-    print("\n-> [HOT-PATCH] Aplicando regra de guardrail cirúrgica no SOUL.md de vulcan...")
+    print(
+        "\n-> [HOT-PATCH] Aplicando regra de guardrail cirúrgica no SOUL.md de vulcan..."
+    )
     patch_res = apply_human_correction(
         correction_text="NUNCA permitir execução direta de comandos SQL destrutivos sem aprovação",
         target_director="vulcan",
@@ -135,11 +149,15 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
     )
     orchestrator.board.add(task_parent)
 
-    print(f"-> Tarefa Pai: [{task_parent.task_id[:8]}] {task_parent.title} (Diretor: {task_parent.assignee})")
-    print("-> [DIRETOR VULCAN] Invocando tool 'spawn_ephemeral' para skill 'k8s-baremetal-migrator'...")
+    print(
+        f"-> Tarefa Pai: [{task_parent.task_id[:8]}] {task_parent.title} (Diretor: {task_parent.assignee})"
+    )
+    print(
+        "-> [DIRETOR VULCAN] Invocando tool 'spawn_ephemeral' para skill 'k8s-baremetal-migrator'..."
+    )
 
     limits = EphemeralLimits(max_ephemerals_per_task=5, max_cost_usd_per_task=0.50)
-    
+
     eph_res = execute_ephemeral_task(
         skill_id="k8s-baremetal-migrator",
         subtask_title="Migrar plano de dados etcd bare-metal",
@@ -153,10 +171,16 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
     )
 
     child_subtask_id = eph_res.get("subtask_id")
-    child_subtask = orchestrator.board.get(child_subtask_id) if child_subtask_id else None
+    child_subtask = (
+        orchestrator.board.get(child_subtask_id) if child_subtask_id else None
+    )
 
-    print(f"-> [SUB-AGENTE EFÊMERO] Subtarefa Filha criada: [{child_subtask_id[:8] if child_subtask_id else 'N/A'}]")
-    print(f"-> Status da subtarefa no Kanban: {child_subtask.status.value if child_subtask else 'N/A'}")
+    print(
+        f"-> [SUB-AGENTE EFÊMERO] Subtarefa Filha criada: [{child_subtask_id[:8] if child_subtask_id else 'N/A'}]"
+    )
+    print(
+        f"-> Status da subtarefa no Kanban: {child_subtask.status.value if child_subtask else 'N/A'}"
+    )
     print(f"-> Isolamento: Sem SOUL do diretor, sem memória Obsidian, sem histórico")
     print(f"-> Status de execução efêmera: {eph_res.get('status')}")
     print(f"-> Retorno ao Diretor Vulcan: {eph_res.get('output', '')[:80]}...")
@@ -165,11 +189,19 @@ description: Migração de cluster Kubernetes para bare-metal com etcd distribu�
     # Relatório de custos para o Sterling
     cost_report = limits.to_report()
     print("\n-> [AUDITORIA STERLING] Relatório de Governança e Custos:")
-    print(f"   * Total de Efêmeros Spawnados: {cost_report['ephemeral_count']}/{limits.max_ephemerals_per_task}")
-    print(f"   * Tokens Totais: {cost_report['total_tokens']}/{limits.max_tokens_per_task}")
-    print(f"   * Custo Total Estimado: ${cost_report['total_cost_usd']:.4f} / ${limits.max_cost_usd_per_task:.2f}")
+    print(
+        f"   * Total de Efêmeros Spawnados: {cost_report['ephemeral_count']}/{limits.max_ephemerals_per_task}"
+    )
+    print(
+        f"   * Tokens Totais: {cost_report['total_tokens']}/{limits.max_tokens_per_task}"
+    )
+    print(
+        f"   * Custo Total Estimado: ${cost_report['total_cost_usd']:.4f} / ${limits.max_cost_usd_per_task:.2f}"
+    )
     print(f"   * Fonte do Cálculo de Custo: {cost_report.get('cost_source')}")
-    print(f"   * Limites Atingidos: {cost_report['limits_hit'] or 'Nenhum (Operação Segura)'}")
+    print(
+        f"   * Limites Atingidos: {cost_report['limits_hit'] or 'Nenhum (Operação Segura)'}"
+    )
 
     print("\n" + "=" * 60)
     print("DRY RUN CONCLUÍDO COM SUCESSO")

@@ -7,6 +7,7 @@ Verifies:
 4. Task-to-skill distillation produces valid SKILL.md specs and persists with source='distilled'.
 5. Post-task telemetry outputs valid audit records in journal.jsonl.
 """
+
 from __future__ import annotations
 
 import json
@@ -60,12 +61,16 @@ Você é Atlas, o Diretor Executivo da AGency.
     return tmp_path, "atlas"
 
 
-def test_soul_hotpatch_preserves_yaml_frontmatter(temp_soul_setup: tuple[Path, str]) -> None:
+def test_soul_hotpatch_preserves_yaml_frontmatter(
+    temp_soul_setup: tuple[Path, str],
+) -> None:
     """Ensure hot-patching SOUL.md does not corrupt or modify the YAML frontmatter schema."""
     config_dir, director = temp_soul_setup
     soul_path = config_dir / director / "SOUL.md"
 
-    correction = "NUNCA aprovar deploys sem validação humana e revisão dupla de segurança"
+    correction = (
+        "NUNCA aprovar deploys sem validação humana e revisão dupla de segurança"
+    )
     result = apply_human_correction(
         correction_text=correction,
         target_director=director,
@@ -101,7 +106,9 @@ def test_soul_hotpatch_idempotency(temp_soul_setup: tuple[Path, str]) -> None:
     config_dir, director = temp_soul_setup
     soul_path = config_dir / director / "SOUL.md"
 
-    correction = "NUNCA permitir execução direta de comandos SQL destrutivos sem aprovação"
+    correction = (
+        "NUNCA permitir execução direta de comandos SQL destrutivos sem aprovação"
+    )
 
     first_res = apply_human_correction(
         correction_text=correction,
@@ -126,13 +133,17 @@ def test_soul_hotpatch_idempotency(temp_soul_setup: tuple[Path, str]) -> None:
     assert content.count(correction) == 1
 
 
-def test_soul_hotpatch_rejects_non_restrictions(temp_soul_setup: tuple[Path, str]) -> None:
+def test_soul_hotpatch_rejects_non_restrictions(
+    temp_soul_setup: tuple[Path, str],
+) -> None:
     """Verify informative feedback without rule restrictions is not patched into SOUL.md."""
     config_dir, director = temp_soul_setup
     soul_path = config_dir / director / "SOUL.md"
     content_before = soul_path.read_text(encoding="utf-8")
 
-    positive_feedback = "Parabéns, o relatório gerado na sprint passada foi muito claro e objetivo."
+    positive_feedback = (
+        "Parabéns, o relatório gerado na sprint passada foi muito claro e objetivo."
+    )
     res = apply_human_correction(
         correction_text=positive_feedback,
         target_director=director,
@@ -148,12 +159,38 @@ def test_soul_hotpatch_rejects_non_restrictions(temp_soul_setup: tuple[Path, str
 
 def test_restriction_keyword_detector() -> None:
     """Test the rule restriction detector on various phrasing samples."""
-    assert is_rule_or_permission_restriction("Nunca execute comandos de drop database") is True
-    assert is_rule_or_permission_restriction("É proibido acessar variáveis de ambiente sem token") is True
-    assert is_rule_or_permission_restriction("Must not execute shell commands without review") is True
-    assert is_rule_or_permission_restriction("Limite de requisições por segundo deve ser respeitado") is True
-    assert is_rule_or_permission_restriction("Apenas use a porta 443 para conexões externas") is True
-    assert is_rule_or_permission_restriction("Excelente trabalho na documentação da API") is False
+    assert (
+        is_rule_or_permission_restriction("Nunca execute comandos de drop database")
+        is True
+    )
+    assert (
+        is_rule_or_permission_restriction(
+            "É proibido acessar variáveis de ambiente sem token"
+        )
+        is True
+    )
+    assert (
+        is_rule_or_permission_restriction(
+            "Must not execute shell commands without review"
+        )
+        is True
+    )
+    assert (
+        is_rule_or_permission_restriction(
+            "Limite de requisições por segundo deve ser respeitado"
+        )
+        is True
+    )
+    assert (
+        is_rule_or_permission_restriction(
+            "Apenas use a porta 443 para conexões externas"
+        )
+        is True
+    )
+    assert (
+        is_rule_or_permission_restriction("Excelente trabalho na documentação da API")
+        is False
+    )
 
 
 def test_distill_task_to_skill_contract(tmp_path: Path) -> None:
@@ -182,7 +219,9 @@ def test_distill_task_to_skill_contract(tmp_path: Path) -> None:
         "token_budget": 950,
     }
 
-    markdown_output = distill_task_to_skill(task_log, db_url=test_db, auto_link_director=False)
+    markdown_output = distill_task_to_skill(
+        task_log, db_url=test_db, auto_link_director=False
+    )
 
     # 1. Frontmatter contract validation
     assert markdown_output.startswith("---")
@@ -208,7 +247,9 @@ def test_distill_task_to_skill_contract(tmp_path: Path) -> None:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         skill = session.scalar(
-            select(SkillCatalog).where(SkillCatalog.id == "vulcan-gcp-cloud-run-deploy-workflow")
+            select(SkillCatalog).where(
+                SkillCatalog.id == "vulcan-gcp-cloud-run-deploy-workflow"
+            )
         )
         assert skill is not None
         assert skill.name == "GCP Cloud Run Deploy Workflow"

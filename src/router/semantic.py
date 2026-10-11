@@ -24,18 +24,22 @@ from src.catalog.skills_engine import DirectorSkillsEngine, SkillMatchResult
 from src.database.models import Agent, AgentTool
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{_REPO_ROOT / 'agency_agents.db'}")
+DEFAULT_DB_URL = os.getenv(
+    "DATABASE_URL", f"sqlite:///{_REPO_ROOT / 'agency_agents.db'}"
+)
 DEFAULT_CHROMA_PATH = Path(os.getenv("CHROMA_PERSIST_DIR", str(_REPO_ROOT / "chroma")))
-DEFAULT_CATALOG_PATH = Path(os.getenv("CATALOG_PATH", str(_REPO_ROOT / "src" / "bots_config")))
+DEFAULT_CATALOG_PATH = Path(
+    os.getenv("CATALOG_PATH", str(_REPO_ROOT / "src" / "bots_config"))
+)
 
 
 # Fixed domain priority for deterministic tie-breaking (lower = higher priority)
 DOMAIN_PRIORITY: dict[str, int] = {
-    'engineering': 0,
-    'operations': 1,
-    'business': 2,
-    'research': 3,
-    'governance': 4,
+    "engineering": 0,
+    "operations": 1,
+    "business": 2,
+    "research": 3,
+    "governance": 4,
 }
 _DEFAULT_DOMAIN_PRIORITY = 99
 
@@ -53,7 +57,7 @@ class RouterDataError(RuntimeError):
 
 
 class AuthorizedTool(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra="ignore")
 
     tool_id: str
     name: str
@@ -66,7 +70,7 @@ class AuthorizedTool(BaseModel):
 
 
 class RouteAgentResult(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra="ignore")
 
     matched: bool
     score: float | None = None
@@ -86,11 +90,11 @@ def _read_prompt(source_root: Path, relative_path: str) -> str:
     try:
         prompt_path.relative_to(root)
     except ValueError as exc:
-        raise RouterDataError('agent prompt path escapes catalog root') from exc
+        raise RouterDataError("agent prompt path escapes catalog root") from exc
     try:
-        return prompt_path.read_text(encoding='utf-8')
+        return prompt_path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise RouterDataError(f'unable to read agent prompt: {relative_path}') from exc
+        raise RouterDataError(f"unable to read agent prompt: {relative_path}") from exc
 
 
 def _authorized_tools(agent: Agent) -> list[AuthorizedTool]:
@@ -120,16 +124,17 @@ def route_agent(
     chroma_path: Path | str | None = None,
     source_root: Path | str | None = None,
     embedding_function: Any | None = None,
-    **kwargs
+    **kwargs,
 ) -> RouteAgentResult:
     import logging
+
     _logger = logging.getLogger(__name__)
 
     query = query.strip()
     if not query:
-        raise ValueError('query must not be empty')
+        raise ValueError("query must not be empty")
     if not 0.0 <= threshold <= 1.0:
-        raise ValueError('threshold must be between 0 and 1')
+        raise ValueError("threshold must be between 0 and 1")
 
     db_url = database_url or DEFAULT_DB_URL
     c_path = Path(chroma_path) if chroma_path else DEFAULT_CHROMA_PATH
@@ -146,18 +151,19 @@ def route_agent(
     vector_scores: dict[str, float] = {}
     try:
         import chromadb
+
         client = chromadb.PersistentClient(path=str(c_path))
         try:
-            collection = client.get_collection('agency_agents')
+            collection = client.get_collection("agency_agents")
             count = collection.count()
             if count > 0:
                 v_res = collection.query(
                     query_embeddings=embedder([query]),
                     n_results=min(15, count),
-                    include=['distances'],
+                    include=["distances"],
                 )
-                ids = v_res.get('ids') or [[]]
-                dists = v_res.get('distances') or [[]]
+                ids = v_res.get("ids") or [[]]
+                dists = v_res.get("distances") or [[]]
                 for aid, dist in zip(ids[0], dists[0], strict=False):
                     sim = max(0.0, min(1.0, 1.0 - float(dist)))
                     vector_scores[aid] = sim
@@ -173,11 +179,27 @@ def route_agent(
 
     fts_scores: dict[str, float] = {}
     try:
-        raw_tokens = re.findall(r'\b[a-zA-Z0-9_]{2,}\b', query)
-        stopwords = {'preciso', 'criar', 'uma', 'para', 'otimizar', 'busca', 'desenhar', 'fluxo', 'aplicativo', 'montar', 'proximo', 'dados', 'segundo', 'normas', 'analisar'}
+        raw_tokens = re.findall(r"\b[a-zA-Z0-9_]{2,}\b", query)
+        stopwords = {
+            "preciso",
+            "criar",
+            "uma",
+            "para",
+            "otimizar",
+            "busca",
+            "desenhar",
+            "fluxo",
+            "aplicativo",
+            "montar",
+            "proximo",
+            "dados",
+            "segundo",
+            "normas",
+            "analisar",
+        }
         clean_terms = [t for t in raw_tokens if t.lower() not in stopwords]
         if clean_terms:
-            fts_q = ' OR '.join(f'"{t}"' for t in clean_terms)
+            fts_q = " OR ".join(f'"{t}"' for t in clean_terms)
             sql = "SELECT agent_id, rank FROM agents_fts WHERE agents_fts MATCH :q ORDER BY rank LIMIT 15"
             rows = session.execute(text(sql), {"q": fts_q}).fetchall()
             for r in rows:
@@ -190,7 +212,7 @@ def route_agent(
     candidates = set(vector_scores.keys()) | set(fts_scores.keys())
     if not candidates:
         session.close()
-        raise CatalogEmptyError('agency_agents collection or database is empty')
+        raise CatalogEmptyError("agency_agents collection or database is empty")
 
     # Resolve macro_domain for each candidate (for tie-breaking)
     domain_map: dict[str, str] = {}
@@ -214,7 +236,7 @@ def route_agent(
         else:
             final_score = f_score
 
-        domain = domain_map.get(aid, '').lower()
+        domain = domain_map.get(aid, "").lower()
         priority = DOMAIN_PRIORITY.get(domain, _DEFAULT_DOMAIN_PRIORITY)
         ranked.append((aid, final_score, priority))
 
@@ -228,7 +250,7 @@ def route_agent(
             matched=False,
             score=round(best_score, 4),
             tools=[],
-            reason=f'best candidate score ({best_score:.4f}) below threshold ({threshold:.2f})',
+            reason=f"best candidate score ({best_score:.4f}) below threshold ({threshold:.2f})",
         )
 
     # 4. Resolve Agent details from SQLite
@@ -244,7 +266,7 @@ def route_agent(
                 matched=False,
                 score=round(best_score, 4),
                 tools=[],
-                reason='agent found in index but inactive or missing in database',
+                reason="agent found in index but inactive or missing in database",
             )
 
         # Resolve director skill if applicable
@@ -276,7 +298,7 @@ def route_agent(
             system_prompt=_read_prompt(s_root, agent.system_prompt_path),
             tools=_authorized_tools(agent),
             skill_match=skill_match_dict,
-            reason='matched candidate above threshold',
+            reason="matched candidate above threshold",
         )
     finally:
         session.close()
@@ -299,6 +321,7 @@ def resolve_director_skill(
     chroma_client = None
     try:
         import chromadb
+
         chroma_client = chromadb.PersistentClient(path=str(c_path))
     except (ImportError, OSError, RuntimeError, ValueError):
         chroma_client = None
@@ -311,4 +334,3 @@ def resolve_director_skill(
             threshold=threshold,
         )
         return engine_instance.resolve_skill(director_id, task_prompt)
-

@@ -17,7 +17,9 @@ class CatalogContractTests(unittest.TestCase):
             trigger_hooks=["Modern frontend applications", " UI implementation "],
         )
 
-        self.assertEqual(agent.trigger_hooks, ["Modern frontend applications", "UI implementation"])
+        self.assertEqual(
+            agent.trigger_hooks, ["Modern frontend applications", "UI implementation"]
+        )
         self.assertTrue(agent.is_active)
         self.assertIsNone(agent.squad)
 

@@ -16,8 +16,12 @@ from sqlalchemy.orm import Session
 from src.database.models import Agent, Base, DirectorSkill, SkillCatalog
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}")
-DEFAULT_CATALOG_PATH = PROJECT_ROOT / "src" / "bots_config" / "catalog" / "ephemeral_tools.json"
+DEFAULT_DB_URL = os.getenv(
+    "DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}"
+)
+DEFAULT_CATALOG_PATH = (
+    PROJECT_ROOT / "src" / "bots_config" / "catalog" / "ephemeral_tools.json"
+)
 
 DIRECTOR_METADATA: dict[str, dict[str, Any]] = {
     "atlas": {
@@ -30,7 +34,12 @@ DIRECTOR_METADATA: dict[str, dict[str, Any]] = {
         "name": "Vulcan",
         "macro_domain": "engineering",
         "system_prompt_path": "src/bots_config/vulcan/SOUL.md",
-        "trigger_hooks": ["software engineering", "devops", "infrastructure", "security"],
+        "trigger_hooks": [
+            "software engineering",
+            "devops",
+            "infrastructure",
+            "security",
+        ],
     },
     "aura": {
         "name": "Aura",
@@ -448,7 +457,9 @@ BASE_DIRECTOR_SKILLS: list[dict[str, Any]] = [
 ]
 
 
-def render_skill_markdown(name: str, slug: str, description: str, keywords: list[str] | None = None) -> str:
+def render_skill_markdown(
+    name: str, slug: str, description: str, keywords: list[str] | None = None
+) -> str:
     """Generate standard SKILL.md markdown text."""
     kw_line = ", ".join(keywords) if keywords else "n/a"
     return f"""---
@@ -505,17 +516,21 @@ def load_ephemeral_tools_from_json(catalog_path: Path) -> list[dict[str, Any]]:
             director_id = item.get("target_director", "atlas")
             keywords = item.get("trigger_keywords", [])
             budget = int(item.get("budget_tokens", item.get("token_budget", 800)))
-            converted.append({
-                "id": str(tool_id),
-                "name": str(name),
-                "description": str(desc),
-                "director_id": str(director_id),
-                "is_core": False,
-                "load_priority": 2,
-                "token_budget": budget,
-                "source": "catalog_json",
-                "content_md": render_skill_markdown(str(name), str(tool_id), str(desc), keywords),
-            })
+            converted.append(
+                {
+                    "id": str(tool_id),
+                    "name": str(name),
+                    "description": str(desc),
+                    "director_id": str(director_id),
+                    "is_core": False,
+                    "load_priority": 2,
+                    "token_budget": budget,
+                    "source": "catalog_json",
+                    "content_md": render_skill_markdown(
+                        str(name), str(tool_id), str(desc), keywords
+                    ),
+                }
+            )
         return converted
     except (json.JSONDecodeError, OSError, KeyError, ValueError) as exc:
         print(f"Warning: failed to parse catalog JSON ({exc})", file=sys.stderr)
@@ -561,7 +576,9 @@ def seed_skills_catalog(
 
         for item in skills_to_seed:
             skill_id = item["id"]
-            existing_skill = session.scalar(select(SkillCatalog).where(SkillCatalog.id == skill_id))
+            existing_skill = session.scalar(
+                select(SkillCatalog).where(SkillCatalog.id == skill_id)
+            )
             if existing_skill:
                 existing_skill.name = item["name"]
                 existing_skill.description = item["description"]
@@ -613,8 +630,12 @@ def seed_skills_catalog(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed skills catalog and director associations")
-    parser.add_argument("--db-url", default=DEFAULT_DB_URL, help="Database connection URL")
+    parser = argparse.ArgumentParser(
+        description="Seed skills catalog and director associations"
+    )
+    parser.add_argument(
+        "--db-url", default=DEFAULT_DB_URL, help="Database connection URL"
+    )
     parser.add_argument(
         "--catalog-path",
         type=Path,

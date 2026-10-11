@@ -3,6 +3,7 @@
 This is the main entry point for the AGency MCP server.
 Run with: `python -m src.mcp_servers.server`
 """
+
 from __future__ import annotations
 
 import sys
@@ -20,10 +21,13 @@ from src.mcp_servers.health import mcp as health_mcp
 # and add health tools to it, or run both. For now, we'll just run the router.
 # In a production setup, you'd want to combine them or run separate servers.
 
+
 def main() -> None:
     """Run the combined AGency MCP server."""
     print("Starting AGency MCP Server...")
-    print("Available tools: route_agent, list_agents, health_check, agent_health_check, list_agents_health")
+    print(
+        "Available tools: route_agent, list_agents, health_check, agent_health_check, list_agents_health"
+    )
     # Run the router MCP server (it's the primary one)
     router_mcp.run()
 

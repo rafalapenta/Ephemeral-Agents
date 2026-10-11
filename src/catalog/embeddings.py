@@ -7,6 +7,7 @@ Provides:
 - get_embedding_function(): Factory resolving AGENCY_EMBEDDINGS (local | gateway | hash)
 - Index metadata compatibility checker
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,16 +28,16 @@ METADATA_FILENAME = "embedding_meta.json"
 @runtime_checkable
 class EmbeddingFunction(Protocol):
     """Protocol conforming to Chroma embedding function signature."""
+
     backend_name: str
     model_name: str
 
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        ...
+    def __call__(self, input: list[str]) -> list[list[float]]: ...
 
 
 class DeterministicHashEmbeddingFunction:
     """Deterministic hash-based embedding function using blake2b.
-    
+
     Works completely offline with 0 dependencies, fast and reproducible for tests.
     """
 
@@ -50,7 +51,9 @@ class DeterministicHashEmbeddingFunction:
         embeddings: list[list[float]] = []
         for text_item in input:
             vec = [0.0] * self.dimensions
-            tokens = re.findall(r"(?u)\b[\w-]+\b", text_item.lower()) or [text_item.lower()]
+            tokens = re.findall(r"(?u)\b[\w-]+\b", text_item.lower()) or [
+                text_item.lower()
+            ]
             for token in tokens:
                 digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
                 idx = int.from_bytes(digest[:4], "big") % self.dimensions
@@ -68,7 +71,9 @@ class LocalEmbeddingFunction:
 
     backend_name: str = "local"
 
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> None:
+    def __init__(
+        self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    ) -> None:
         self.model_name = model_name
         self._model = None
 
@@ -78,6 +83,7 @@ class LocalEmbeddingFunction:
                 self._model = _MODEL_CACHE[self.model_name]
             else:
                 from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(self.model_name)
                 _MODEL_CACHE[self.model_name] = self._model
         return self._model
@@ -100,17 +106,24 @@ class GatewayEmbeddingFunction:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        self.model_name = model or os.getenv("AGENCY_GATEWAY_EMBEDDING_MODEL", "openai/mistral-embed")
+        self.model_name = model or os.getenv(
+            "AGENCY_GATEWAY_EMBEDDING_MODEL", "openai/mistral-embed"
+        )
         self.dimensions = dimensions
         self.api_base = (
             api_base
             or os.getenv("AGENCY_LLM_BASE_URL")
             or os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1")
         ).rstrip("/")
-        self.api_key = api_key or os.getenv("AGENCY_LLM_API_KEY") or os.getenv("OMNIROUTE_API_KEY", "")
+        self.api_key = (
+            api_key
+            or os.getenv("AGENCY_LLM_API_KEY")
+            or os.getenv("OMNIROUTE_API_KEY", "")
+        )
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         import litellm
+
         try:
             res = litellm.embedding(
                 model=self.model_name,
@@ -138,7 +151,7 @@ def get_embedding_function(
     model_name: str | None = None,
 ) -> Any:
     """Resolve the appropriate embedding function based on AGENCY_EMBEDDINGS.
-    
+
     If 'local' is chosen and sentence-transformers is missing, gracefully falls back
     to 'hash' with a descriptive warning.
     """
@@ -151,7 +164,10 @@ def get_embedding_function(
     elif resolved == "local":
         try:
             import sentence_transformers  # noqa: F401
-            return LocalEmbeddingFunction(model_name=model_name or "paraphrase-multilingual-MiniLM-L12-v2")
+
+            return LocalEmbeddingFunction(
+                model_name=model_name or "paraphrase-multilingual-MiniLM-L12-v2"
+            )
         except ImportError:
             logger.warning(
                 "sentence-transformers not installed; falling back to 'hash' embeddings. "
@@ -159,7 +175,9 @@ def get_embedding_function(
             )
             return DeterministicHashEmbeddingFunction()
     else:
-        logger.warning("Unknown AGENCY_EMBEDDINGS '%s'; falling back to 'hash'.", resolved)
+        logger.warning(
+            "Unknown AGENCY_EMBEDDINGS '%s'; falling back to 'hash'.", resolved
+        )
         return DeterministicHashEmbeddingFunction()
 
 
@@ -175,7 +193,9 @@ def save_embedding_metadata(chroma_path: Path | str, embedding_fn: Any) -> None:
     meta_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def check_embedding_compatibility(chroma_path: Path | str, embedding_fn: Any | None = None) -> tuple[bool, str | None]:
+def check_embedding_compatibility(
+    chroma_path: Path | str, embedding_fn: Any | None = None
+) -> tuple[bool, str | None]:
     """Verify whether current embedding function matches index metadata."""
     if embedding_fn is None:
         embedding_fn = get_embedding_function()
@@ -190,7 +210,9 @@ def check_embedding_compatibility(chroma_path: Path | str, embedding_fn: Any | N
         current_backend = getattr(embedding_fn, "backend_name", "unknown")
         current_model = getattr(embedding_fn, "model_name", "unknown")
 
-        if (stored_backend and stored_backend != current_backend) or (stored_model and stored_model != current_model):
+        if (stored_backend and stored_backend != current_backend) or (
+            stored_model and stored_model != current_model
+        ):
             msg = (
                 f"Aviso: O catálogo foi indexado com o backend '{stored_backend}' ({stored_model}), "
                 f"mas a configuração atual é '{current_backend}' ({current_model}). "

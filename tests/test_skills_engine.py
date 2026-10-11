@@ -76,12 +76,34 @@ def db_session() -> Session:
         session.flush()
 
         # Associations
-        session.add_all([
-            DirectorSkill(director_id="vulcan", skill_id="pytest-runner", is_core=True, load_priority=1),
-            DirectorSkill(director_id="vulcan", skill_id="clean-architecture", is_core=True, load_priority=2),
-            DirectorSkill(director_id="sterling", skill_id="runway-forecasting", is_core=True, load_priority=1),
-            DirectorSkill(director_id="sterling", skill_id="token-cost-calculator", is_core=True, load_priority=2),
-        ])
+        session.add_all(
+            [
+                DirectorSkill(
+                    director_id="vulcan",
+                    skill_id="pytest-runner",
+                    is_core=True,
+                    load_priority=1,
+                ),
+                DirectorSkill(
+                    director_id="vulcan",
+                    skill_id="clean-architecture",
+                    is_core=True,
+                    load_priority=2,
+                ),
+                DirectorSkill(
+                    director_id="sterling",
+                    skill_id="runway-forecasting",
+                    is_core=True,
+                    load_priority=1,
+                ),
+                DirectorSkill(
+                    director_id="sterling",
+                    skill_id="token-cost-calculator",
+                    is_core=True,
+                    load_priority=2,
+                ),
+            ]
+        )
         session.commit()
 
         yield session
@@ -97,13 +119,18 @@ def test_get_authorized_skills_isolation(db_session: Session) -> None:
 
     sterling_skills = engine.get_authorized_skills("sterling")
     assert len(sterling_skills) == 2
-    assert [s.id for s in sterling_skills] == ["runway-forecasting", "token-cost-calculator"]
+    assert [s.id for s in sterling_skills] == [
+        "runway-forecasting",
+        "token-cost-calculator",
+    ]
 
     unknown_skills = engine.get_authorized_skills("unknown")
     assert unknown_skills == []
 
 
-def test_success_technical_command_vulcan_matches_above_threshold(db_session: Session) -> None:
+def test_success_technical_command_vulcan_matches_above_threshold(
+    db_session: Session,
+) -> None:
     """Test success scenario: Vulcan's technical command with high similarity (> 0.72) returns match."""
     engine = DirectorSkillsEngine(db_session=db_session, threshold=0.72)
 
@@ -118,11 +145,15 @@ def test_success_technical_command_vulcan_matches_above_threshold(db_session: Se
     assert "Matched authorized skill 'pytest-runner'" in result.reason
 
 
-def test_department_isolation_vulcan_cannot_match_sterling_skills(db_session: Session) -> None:
+def test_department_isolation_vulcan_cannot_match_sterling_skills(
+    db_session: Session,
+) -> None:
     """Test department scoping: Vulcan cannot retrieve a skill exclusive to Sterling even with financial terms."""
     engine = DirectorSkillsEngine(db_session=db_session, threshold=0.72)
 
-    financial_prompt = "Projeção de fluxo de caixa, queima financeira e simulações de runway"
+    financial_prompt = (
+        "Projeção de fluxo de caixa, queima financeira e simulações de runway"
+    )
 
     # Querying as Vulcan
     vulcan_result: SkillMatchResult = engine.resolve_skill("vulcan", financial_prompt)
@@ -135,14 +166,18 @@ def test_department_isolation_vulcan_cannot_match_sterling_skills(db_session: Se
     assert vulcan_result.candidate_id != "token-cost-calculator"
 
     # Querying the exact same prompt as Sterling MUST succeed
-    sterling_result: SkillMatchResult = engine.resolve_skill("sterling", financial_prompt)
+    sterling_result: SkillMatchResult = engine.resolve_skill(
+        "sterling", financial_prompt
+    )
     assert sterling_result.matched is True
     assert sterling_result.score >= 0.72
     assert sterling_result.skill is not None
     assert sterling_result.skill.id == "runway-forecasting"
 
 
-def test_sub_adherence_vague_or_unknown_prompt_returns_not_matched(db_session: Session) -> None:
+def test_sub_adherence_vague_or_unknown_prompt_returns_not_matched(
+    db_session: Session,
+) -> None:
     """Test sub-adherence scenario: vague or unknown prompt returns matched=False with candidate details."""
     engine = DirectorSkillsEngine(db_session=db_session, threshold=0.72)
 

@@ -10,6 +10,7 @@ Thread-safety:
 Persistence:
   - ``os.replace`` for atomic writes (no partial state on crash).
 """
+
 from __future__ import annotations
 
 import json
@@ -29,6 +30,7 @@ _DEFAULT_STATE_DIR = Path("state_data")
 
 # ── Cross-platform file locking ────────────────────────────────
 
+
 class _FileLock:
     """Advisory file lock: fcntl on POSIX, msvcrt on Windows."""
 
@@ -41,9 +43,11 @@ class _FileLock:
         self._fd = os.open(str(self._path), os.O_CREAT | os.O_RDWR)
         if sys.platform == "win32":
             import msvcrt
+
             msvcrt.locking(self._fd, msvcrt.LK_LOCK, 1)
         else:
             import fcntl
+
             fcntl.flock(self._fd, fcntl.LOCK_EX)
 
     def release(self) -> None:
@@ -51,18 +55,21 @@ class _FileLock:
             return
         if sys.platform == "win32":
             import msvcrt
+
             try:
                 msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
             except OSError:
                 pass
         else:
             import fcntl
+
             fcntl.flock(self._fd, fcntl.LOCK_UN)
         os.close(self._fd)
         self._fd = None
 
 
 # ── Journal Entry ──────────────────────────────────────────────
+
 
 class JournalEntry:
     """Single append-only journal record."""
@@ -91,6 +98,7 @@ class JournalEntry:
 
 
 # ── State Manager ─────────────────────────────────────────────
+
 
 class StateManager:
     """Manages persistent JSON state with RFC 7396 merge-patch mutations.
@@ -191,7 +199,11 @@ class StateManager:
         journal_path: Path | str | None = None,
     ) -> dict[str, Any]:
         """Record post-task execution telemetry in journal.jsonl."""
-        target = Path(journal_path) if journal_path is not None else Path("data/journal.jsonl")
+        target = (
+            Path(journal_path)
+            if journal_path is not None
+            else Path("data/journal.jsonl")
+        )
         return record_telemetry(metrics, journal_path=target)
 
     # ── Internals ──────────────────────────────────────────────
@@ -248,4 +260,3 @@ def record_telemetry(
     finally:
         lock.release()
     return metrics
-

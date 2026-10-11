@@ -1,4 +1,5 @@
 """Lightweight task scheduler wrapper around MacroOrchestrator."""
+
 from __future__ import annotations
 
 import logging
@@ -25,9 +26,13 @@ class OrchestratorScheduler:
     def process_ready_tasks(self) -> list[OrchestrationResult]:
         """Process all tasks currently in READY state."""
         results = []
-        ready_tasks = self.orchestrator.board.columns().get(KanbanStatus.READY.value, [])
+        ready_tasks = self.orchestrator.board.columns().get(
+            KanbanStatus.READY.value, []
+        )
         for task in ready_tasks:
-            logger.info("Scheduler picking up ready task %s: %s", task.task_id, task.title)
+            logger.info(
+                "Scheduler picking up ready task %s: %s", task.task_id, task.title
+            )
             res = self.orchestrator.orchestrate_task(task, query=task.title)
             results.append(res)
         return results
@@ -41,12 +46,14 @@ def main() -> None:
     """CLI entrypoint for running the scheduler once or in a loop."""
     import argparse
     from dotenv import load_dotenv
-    
+
     load_dotenv()
-    
+
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="AGency Orchestrator Scheduler")
-    parser.add_argument("--poll-once", action="store_true", help="Run a single polling cycle and exit")
+    parser.add_argument(
+        "--poll-once", action="store_true", help="Run a single polling cycle and exit"
+    )
     args = parser.parse_args()
 
     orchestrator = MacroOrchestrator()
@@ -68,4 +75,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

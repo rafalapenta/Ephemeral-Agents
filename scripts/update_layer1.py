@@ -392,7 +392,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
-SEMANTIC_CODE = '''from __future__ import annotations
+SEMANTIC_CODE = """from __future__ import annotations
 
 import math
 import re
@@ -616,7 +616,7 @@ def route_agent(
         )
     finally:
         session.close()
-'''
+"""
 
 SRC_CATALOG.parent.mkdir(parents=True, exist_ok=True)
 SRC_ROUTER.parent.mkdir(parents=True, exist_ok=True)

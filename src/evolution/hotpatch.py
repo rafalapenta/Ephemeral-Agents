@@ -4,6 +4,7 @@ Applies surgical atomic updates to the 'Limites Invioláveis' section of
 a target director's SOUL.md when a human correction represents a rule or
 permission restriction, and logs the change to Git/audit history.
 """
+
 from __future__ import annotations
 
 import json
@@ -162,7 +163,11 @@ def apply_human_correction(
 
         # Append formatted rule to existing section
         stripped_body = section_body.rstrip()
-        new_section_body = f"{stripped_body}\n{formatted_rule}\n" if stripped_body else f"{formatted_rule}\n"
+        new_section_body = (
+            f"{stripped_body}\n{formatted_rule}\n"
+            if stripped_body
+            else f"{formatted_rule}\n"
+        )
         new_body = (
             body[: match.start()]
             + f"{section_header}{new_section_body}"
@@ -179,7 +184,9 @@ def apply_human_correction(
             new_body = f"{new_section}{body.lstrip()}"
 
     # Reconstruct document
-    new_content = f"{frontmatter_raw}\n{new_body.lstrip()}" if frontmatter_raw else new_body
+    new_content = (
+        f"{frontmatter_raw}\n{new_body.lstrip()}" if frontmatter_raw else new_body
+    )
 
     # Safety regression check on frontmatter schema
     test_fm, _, _ = _split_frontmatter(new_content)

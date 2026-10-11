@@ -1,4 +1,5 @@
 """Memory (FTS5 search) + Scheduler tests for Agentic OS (v0.4.0)."""
+
 import sys
 import unittest
 from pathlib import Path
@@ -102,7 +103,8 @@ class SkillGenerateTests(unittest.TestCase):
 
     def test_generate_skill(self):
         status, data = self.h.api(
-            "POST", "/api/skills/generate",
+            "POST",
+            "/api/skills/generate",
             {"name": "Test Skill V4", "description": "A test skill"},
         )
         self.assertEqual(status, 200)
@@ -116,7 +118,8 @@ class SkillGenerateTests(unittest.TestCase):
 
     def test_generate_invalid_name(self):
         status, _ = self.h.api(
-            "POST", "/api/skills/generate",
+            "POST",
+            "/api/skills/generate",
             {"name": "bad name/../../x", "description": "bad"},
         )
         self.assertEqual(status, 400)
