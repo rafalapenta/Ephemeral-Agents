@@ -19,6 +19,7 @@ data/*.db
 chroma_data/
 venv/
 .venv/
+.venv-ci/
 env/
 
 # --- Logs & Local Session ---
