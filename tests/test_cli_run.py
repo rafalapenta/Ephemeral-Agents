@@ -170,7 +170,7 @@ def test_marketing_task_cannot_resolve_to_agentmail_or_pytest_runner(
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     runs_dir = tmp_path / "runs"
 
-    task_prompt = "3 ganchos de post para lançar um serviço de agentes para PMEs"
+    task_prompt = "campanha de panfletagem física e outdoors em eventos presenciais"
 
     # 1. Orchestrator unit evaluation
     orchestrator = MacroOrchestrator(dry_run=True)

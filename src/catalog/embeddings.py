@@ -45,7 +45,9 @@ class DeterministicHashEmbeddingFunction:
 
     def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
-        self.model_name = f"blake2b-{dimensions}"
+
+    def name(self) -> str:
+        return self.model_name
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         embeddings: list[list[float]] = []
@@ -76,6 +78,9 @@ class LocalEmbeddingFunction:
     ) -> None:
         self.model_name = model_name
         self._model = None
+
+    def name(self) -> str:
+        return self.model_name
 
     def _get_model(self):
         if self._model is None:
@@ -120,6 +125,9 @@ class GatewayEmbeddingFunction:
             or os.getenv("AGENCY_LLM_API_KEY")
             or os.getenv("OMNIROUTE_API_KEY", "")
         )
+
+    def name(self) -> str:
+        return self.model_name
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         import litellm
