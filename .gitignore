@@ -12,19 +12,21 @@
 
 # --- Databases ---
 *.db
+data/*.db
 *.sqlite
 *.sqlite3
 *.db-journal
 chroma_data/
 venv/
 .venv/
-env/
+.venv-ci/
 env/
 
-# --- Logs ---
+# --- Logs & Local Session ---
 *.log
 logs/
 .log
+Session Summary & Context Log.md
 
 # --- Python ---
 __pycache__/
@@ -92,3 +94,18 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# === BANCO DE DADOS VETORIAL & DADOS DE EXECUÇÃO ===
+chroma/
+state_data/
+
+# === TRAVAS E LOGS DE ESTADO LOCAL ===
+*.lock
+data/*.lock
+data/hotpatch_history.jsonl
+data/journal.jsonl
+
+# === CONFIGURAÇÕES LOCAIS / MCP ===
+data/.mcp.json
+
+ai-job-search/

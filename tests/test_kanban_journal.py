@@ -1,4 +1,5 @@
 """Kanban + Journal CRUD tests for Agentic OS (v0.4.0)."""
+
 import sys
 import unittest
 from pathlib import Path
@@ -19,9 +20,15 @@ class KanbanTests(unittest.TestCase):
 
     def test_create_and_get_task(self):
         status, data = self.h.api(
-            "POST", "/api/kanban/tasks",
-            {"title": "Test task", "body": "do it", "status": "todo",
-             "priority": "high", "assignee": "tester"},
+            "POST",
+            "/api/kanban/tasks",
+            {
+                "title": "Test task",
+                "body": "do it",
+                "status": "todo",
+                "priority": "high",
+                "assignee": "tester",
+            },
         )
         self.assertEqual(status, 200)
         tid = data["id"]
@@ -33,13 +40,20 @@ class KanbanTests(unittest.TestCase):
 
     def test_update_task(self):
         _, created = self.h.api(
-            "POST", "/api/kanban/tasks",
-            {"title": "Update me", "body": "", "status": "todo",
-             "priority": "low", "assignee": ""},
+            "POST",
+            "/api/kanban/tasks",
+            {
+                "title": "Update me",
+                "body": "",
+                "status": "todo",
+                "priority": "low",
+                "assignee": "",
+            },
         )
         tid = created["id"]
         status, updated = self.h.api(
-            "PATCH", f"/api/kanban/tasks/{tid}",
+            "PATCH",
+            f"/api/kanban/tasks/{tid}",
             {"title": "Updated title", "status": "in_progress"},
         )
         self.assertEqual(status, 200)
@@ -48,9 +62,15 @@ class KanbanTests(unittest.TestCase):
 
     def test_complete_task(self):
         _, created = self.h.api(
-            "POST", "/api/kanban/tasks",
-            {"title": "Complete me", "body": "", "status": "todo",
-             "priority": "medium", "assignee": ""},
+            "POST",
+            "/api/kanban/tasks",
+            {
+                "title": "Complete me",
+                "body": "",
+                "status": "todo",
+                "priority": "medium",
+                "assignee": "",
+            },
         )
         tid = created["id"]
         status, done = self.h.api(
@@ -61,9 +81,15 @@ class KanbanTests(unittest.TestCase):
 
     def test_block_and_unblock(self):
         _, created = self.h.api(
-            "POST", "/api/kanban/tasks",
-            {"title": "Block me", "body": "", "status": "todo",
-             "priority": "medium", "assignee": ""},
+            "POST",
+            "/api/kanban/tasks",
+            {
+                "title": "Block me",
+                "body": "",
+                "status": "todo",
+                "priority": "medium",
+                "assignee": "",
+            },
         )
         tid = created["id"]
         _, blocked = self.h.api(
@@ -76,9 +102,15 @@ class KanbanTests(unittest.TestCase):
 
     def test_comment_roundtrip(self):
         _, created = self.h.api(
-            "POST", "/api/kanban/tasks",
-            {"title": "Comment me", "body": "", "status": "todo",
-             "priority": "low", "assignee": ""},
+            "POST",
+            "/api/kanban/tasks",
+            {
+                "title": "Comment me",
+                "body": "",
+                "status": "todo",
+                "priority": "low",
+                "assignee": "",
+            },
         )
         tid = created["id"]
         _, with_comment = self.h.api(
@@ -108,7 +140,8 @@ class JournalTests(unittest.TestCase):
 
     def test_save_and_get_entry(self):
         status, saved = self.h.api(
-            "PUT", "/api/journal/entries/2026-08-11",
+            "PUT",
+            "/api/journal/entries/2026-08-11",
             {"content": "Today I learned testing."},
         )
         self.assertEqual(status, 200)
@@ -119,16 +152,20 @@ class JournalTests(unittest.TestCase):
         self.assertIn("Today I learned", got["content"])
 
     def test_entries_list_includes_new(self):
-        self.h.api("PUT", "/api/journal/entries/2026-08-10",
-                   {"content": "Journal test entry"})
+        self.h.api(
+            "PUT", "/api/journal/entries/2026-08-10", {"content": "Journal test entry"}
+        )
         status, data = self.h.api("GET", "/api/journal/entries")
         self.assertEqual(status, 200)
         dates = {e["date"] for e in data.get("entries", [])}
         self.assertIn("2026-08-10", dates)
 
     def test_search_finds_content(self):
-        self.h.api("PUT", "/api/journal/entries/2026-08-09",
-                   {"content": "Searchable unicorn keyword here"})
+        self.h.api(
+            "PUT",
+            "/api/journal/entries/2026-08-09",
+            {"content": "Searchable unicorn keyword here"},
+        )
         status, data = self.h.api("GET", "/api/journal/search?q=unicorn")
         self.assertEqual(status, 200)
         hits = data.get("results", [])

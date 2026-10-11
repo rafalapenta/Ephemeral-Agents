@@ -7,6 +7,7 @@ standard library only (urllib + threading + unittest) — no pytest, no httpx.
 
 Run:  python3 tests/run_all.py
 """
+
 import json
 import shutil
 import socket
@@ -115,9 +116,7 @@ class Harness:
             log_level="warning",
         )
         self._uvicorn = uvicorn.Server(config)
-        self._server_thread = threading.Thread(
-            target=self._uvicorn.run, daemon=True
-        )
+        self._server_thread = threading.Thread(target=self._uvicorn.run, daemon=True)
         self._server_thread.start()
         self._wait_ready()
 
@@ -141,11 +140,14 @@ class Harness:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     # ── HTTP helper (stdlib only) ─────────────────────────────
-    def request(self, method: str, path: str, body: dict = None,
-                timeout: float = 15.0) -> tuple:
+    def request(
+        self, method: str, path: str, body: dict = None, timeout: float = 15.0
+    ) -> tuple:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(
-            self.base_url + path, data=data, method=method,
+            self.base_url + path,
+            data=data,
+            method=method,
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -155,8 +157,9 @@ class Harness:
         except urllib.error.HTTPError as e:
             return e.code, e.read()
 
-    def api(self, method: str, path: str, body: dict = None,
-            timeout: float = 15.0) -> tuple:
+    def api(
+        self, method: str, path: str, body: dict = None, timeout: float = 15.0
+    ) -> tuple:
         """Returns (status_code, parsed_json_or_raw_text)."""
         status, raw = self.request(method, path, body, timeout)
         try:
@@ -166,8 +169,14 @@ class Harness:
         return status, parsed
 
     # ── multipart upload helper (stdlib only) ──────────────────
-    def upload(self, path: str, fields: dict, filename: str,
-               content: bytes, timeout: float = 15.0) -> tuple:
+    def upload(
+        self,
+        path: str,
+        fields: dict,
+        filename: str,
+        content: bytes,
+        timeout: float = 15.0,
+    ) -> tuple:
         """POST multipart/form-data: returns (status, parsed_json_or_text)."""
         boundary = "----agenticostestboundary"
         body = b""

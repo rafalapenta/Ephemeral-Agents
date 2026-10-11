@@ -7,6 +7,7 @@ Runs every tests/test_*.py module. Each module boots its own isolated
 Harness (temp state dir), so no real project data is ever touched.
 Requires: python3 + installed deps (fastapi, uvicorn) — no pytest/httpx.
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -23,8 +24,13 @@ import test_v040  # noqa: E402
 def main() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for module in (test_core, test_security, test_kanban_journal,
-                   test_memory_scheduler, test_v040):
+    for module in (
+        test_core,
+        test_security,
+        test_kanban_journal,
+        test_memory_scheduler,
+        test_v040,
+    ):
         suite.addTests(loader.loadTestsFromModule(module))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

@@ -1,1 +1,1 @@
-﻿"Agency agent catalog parsing and indexing."
+"Agency agent catalog parsing and indexing."

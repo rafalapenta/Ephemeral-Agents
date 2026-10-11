@@ -2,13 +2,16 @@ import os
 import subprocess
 import sys
 
-py = r"C:\Users\RAFAEL\AppData\Local\Temp\aggency-phase1-venv\Scripts\python.exe"
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+py = sys.executable
 env = dict(os.environ)
-env["PYTHONPATH"] = r"C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency"
+env["PYTHONPATH"] = str(ROOT)
 
 p = subprocess.Popen(
     [py, "-m", "src.mcp_servers.semantic_router"],
-    cwd=r"C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency",
+    cwd=str(ROOT),
     env=env,
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,

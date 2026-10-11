@@ -1,4 +1,5 @@
 """Linear GraphQL API client for task management."""
+
 from __future__ import annotations
 
 import logging
@@ -13,16 +14,19 @@ logger = logging.getLogger(__name__)
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
+
 class LinearClient:
     """Client for interacting with Linear GraphQL API."""
 
     def __init__(self, api_key: str | None = None, team_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("LINEAR_API_KEY")
         self.team_key = team_key or os.getenv("LINEAR_TEAM_ID")
-        
+
         if not self.api_key or not self.team_key:
-            logger.warning("LINEAR_API_KEY or LINEAR_TEAM_ID not set. Linear integration is disabled.")
-            
+            logger.warning(
+                "LINEAR_API_KEY or LINEAR_TEAM_ID not set. Linear integration is disabled."
+            )
+
         self.headers = {
             "Authorization": str(self.api_key),
             "Content-Type": "application/json",
@@ -30,7 +34,9 @@ class LinearClient:
         # State caching
         self._states: dict[str, str] = {}  # Map of state name (lowercase) to state ID
 
-    def _query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _query(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Execute a GraphQL query against Linear."""
         if not self.api_key:
             raise ValueError("LINEAR_API_KEY is not configured.")
@@ -41,19 +47,23 @@ class LinearClient:
 
         try:
             with httpx.Client(timeout=10.0) as client:
-                response = client.post(LINEAR_GRAPHQL_URL, headers=self.headers, json=payload)
-                
+                response = client.post(
+                    LINEAR_GRAPHQL_URL, headers=self.headers, json=payload
+                )
+
                 # Check for GraphQL errors even if 200 OK
                 if response.status_code != 200:
-                    logger.error("HTTP Error %s: %s", response.status_code, response.text)
-                
+                    logger.error(
+                        "HTTP Error %s: %s", response.status_code, response.text
+                    )
+
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if "errors" in data:
                     logger.error("Linear API Error: %s", data["errors"])
                     raise ValueError(f"Linear API returned errors: {data['errors']}")
-                    
+
                 return data.get("data", {})
         except Exception as exc:
             logger.error("Linear API Request failed: %s", exc)
@@ -63,7 +73,7 @@ class LinearClient:
         """Fetch all workflow states for the team to map them dynamically."""
         if self._states:
             return self._states
-            
+
         query = """
         query($teamKey: String!) {
           workflowStates(filter: { team: { key: { eq: $teamKey } } }) {
@@ -78,12 +88,14 @@ class LinearClient:
         data = self._query(query, {"teamKey": self.team_key})
         nodes = data.get("workflowStates", {}).get("nodes", [])
         if not nodes:
-            logger.warning(f"Could not find workflow states for team with key: {self.team_key}")
-            
+            logger.warning(
+                f"Could not find workflow states for team with key: {self.team_key}"
+            )
+
         states = {}
         for node in nodes:
             states[node["name"].lower()] = node["id"]
-            
+
         self._states = states
         return states
 
@@ -133,7 +145,7 @@ class LinearClient:
                 priority=priority,
             )
             tasks.append(task)
-            
+
         return tasks
 
     def update_issue_state(self, issue_id: str, new_state_name: str) -> bool:
@@ -180,8 +192,10 @@ class LinearClient:
         except Exception:
             return False
 
+
 # Global client singleton (lazy init)
 _linear_client: LinearClient | None = None
+
 
 def get_linear_client() -> LinearClient | None:
     """Get or create the Linear client, returns None if not configured."""

@@ -112,13 +112,20 @@ The returned `OrchestrationResult` contains the matched agent, all gate verdicts
 
 ## Key modules
 
-### `src/catalog/indexer.py`
+### `src/catalog/indexer.py` and `src/catalog/embeddings.py`
 
-Discovers agent definition files (SOUL.md) under a source root, parses their YAML frontmatter and body to extract `agent_id`, `macro_domain`, `squad`, `name`, `trigger_hooks`, and `system_prompt_path`, then writes the results to both a SQLite relational store (via SQLAlchemy) and a ChromaDB vector collection. Embeddings are produced by `HashEmbeddingFunction`, a deterministic Blake2b-based function that requires no external API. The indexer also maintains an FTS5 virtual table for lexical search and expands trigger hooks with a configurable synonym map. On first run it detects a missing database and treats the run as an implicit full reindex; subsequent runs require the explicit `--reindex` flag to avoid accidental overwrites.
+Discovers agent definition files (SOUL.md) under a source root, parses their YAML frontmatter and body to extract `agent_id`, `macro_domain`, `squad`, `name`, `trigger_hooks`, and `system_prompt_path`, then writes the results to both a SQLite relational store (via SQLAlchemy) and a ChromaDB vector collection.
+
+Embeddings are configured via `AGENCY_EMBEDDINGS` (`local` | `gateway` | `hash`):
+- **`local` (default)**: Uses `sentence-transformers` with `paraphrase-multilingual-MiniLM-L12-v2` for high-quality local multilingual semantic search without external API costs (install via `pip install "aggency[local-embeddings]"`).
+- **`gateway`**: Uses OmniRoute or OpenAI-compatible embedding API (`openai/mistral-embed`).
+- **`hash`**: Deterministic Blake2b hashing with zero dependencies, serving as offline fallback and for unit tests.
+
+The indexer saves embedding backend metadata alongside Chroma vectors. On first run it detects a missing database and initialises automatically; subsequent runs require the explicit `--reindex` flag.
 
 ### `src/router/semantic.py`
 
-Implements `route_agent()`, the core routing function. It runs two searches concurrently: a ChromaDB approximate nearest-neighbour query using the same `HashEmbeddingFunction` used at index time, and a SQLite FTS5 match against agent names, domains, squads, and trigger hooks. Scores from both sources are fused with a hybrid formula that favours candidates appearing in both result sets. Ties are broken deterministically by a fixed domain priority order (`engineering` > `operations` > `business` > `research` > `governance`). If the best candidate score falls below the configured threshold the function returns a `RouteAgentResult` with `matched=False`. On a successful match it loads the full agent record from SQLite, reads the system prompt from disk, and assembles the authorised tool list from the `agent_tools` join table.
+Implements `route_agent()`, the core routing function. It runs two searches concurrently: a ChromaDB approximate nearest-neighbour query using the configured embedding function (`AGENCY_EMBEDDINGS`), and a SQLite FTS5 match against agent names, domains, squads, and trigger hooks. If the current embedding backend or model differs from the metadata used to index the catalog, the router logs a compatibility warning requesting an `aggency-index --reindex`. Scores from both sources are fused with a hybrid formula that favours candidates appearing in both result sets. Ties are broken deterministically by a fixed domain priority order (`engineering` > `operations` > `business` > `research` > `governance`). If the best candidate score falls below the configured threshold the function returns a `RouteAgentResult` with `matched=False`. On a successful match it loads the full agent record from SQLite, reads the system prompt from disk, and assembles the authorised tool list from the `agent_tools` join table.
 
 ### `src/macro_agents/orchestrator.py`
 
@@ -136,6 +143,18 @@ Provides `compress_context()`, a pure function that reduces a handoff payload be
 
 Implements `StateManager`, which persists a JSON state document with monotonically increasing version numbers. Every call to `apply()` accepts an RFC 7396 merge-patch dict, bumps the version, appends a `JournalEntry` to `journal.jsonl`, and atomically replaces `state.json` using `os.replace()` after an `fsync`. Concurrent access is safe via a two-layer lock: a `threading.Lock` for in-process concurrency and an advisory file lock (`fcntl` on POSIX, `msvcrt` on Windows) for multi-process scenarios. The `journal()` method returns all entries since a given version, enabling incremental replay and audit.
 
+### Skill telemetry (`src/database/usage.py` & `src/database/models.py`)
+
+Provides privacy-hardened, asynchronous skill execution reporting and lifecycle analytics:
+- **Zero Raw Task Leaks**: Telemetry never records task descriptions, prompts, full outputs, customer data, or secrets. All notes pass through a strict regex sanitizer (redacting emails, phones, CPF/CNPJ, tokens, and query strings) with a 280-character limit.
+- **Asynchronous Journal Logging**: Task execution path writes lightweight structured telemetry directly to `data/journal.jsonl` without database locks or latency overhead.
+- **Idempotent Batch Consolidation**: `consolidate_skill_usage()` parses journal telemetry into relational `SkillUsage` records in SQLite, deduplicating by record ID.
+- **Retention & Daily Aggregation**: `prune_skill_usage()` aggregates records older than `SKILL_USAGE_RETENTION_DAYS` (default 60 days, range 30-90) into `SkillUsageDaily` before pruning detailed rows.
+- **Adaptive Routing & Cost Governance**:
+  - Semantic Router adjusts skill adherence using Bayesian smoothed historical success rates (`score_final = similarity * (1 - w) + smoothed_success_rate * w`).
+  - Sterling aggregates cost per skill across detailed and daily historical tables (`cost_by_skill()`).
+  - Distiller engine proposes targeted skill patches only when supported by concrete evidence (>= `DISTILL_MIN_FAILURES` failures citing `SkillUsage` IDs).
+
 ---
 
 ## Configuration
@@ -144,6 +163,13 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 
 | Variable | Default | Description |
 |---|---|---|
+| `AGENCY_EMBEDDINGS` | `local` | Embedding backend: `local` (sentence-transformers), `gateway` (OmniRoute/OpenAI), `hash` (blake2b) |
+| `AGENCY_LLM_BASE_URL` | `http://localhost:20128/v1` | OpenAI-compatible gateway base URL (alias: `OMNIROUTE_BASE_URL`) |
+| `AGENCY_LLM_API_KEY` | `""` | Gateway bearer token / API key (alias: `OMNIROUTE_API_KEY`) |
+| `AGENCY_EPHEMERAL_MODEL`| `mistral/ministral-8b-latest` | Default model for ephemeral subagents |
+| `SKILL_USAGE_RETENTION_DAYS` | `60` | Retention window (days) for detailed `SkillUsage` records before daily aggregation (30-90) |
+| `ROUTER_SUCCESS_WEIGHT` | `0.3` | Weight `w` for Bayesian success rate smoothing in skill routing (0.0 to 1.0) |
+| `DISTILL_MIN_FAILURES` | `3` | Minimum evidenced failures required for distiller skill improvement proposals |
 | `DATABASE_URL` | `sqlite:///./data/agency_agents.db` | SQLAlchemy DB URL for the agent catalog |
 | `CHROMA_PERSIST_DIR` | `./chroma_data` | ChromaDB persistence directory |
 | `CATALOG_PATH` | `./src/bots_config` | Root path scanned for agent SOUL.md files |

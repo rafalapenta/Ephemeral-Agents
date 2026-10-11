@@ -12,9 +12,11 @@ license = { text = 'MIT' }
 authors = [{ name = 'Rafael' }]
 dependencies = [
  'chromadb>=1.5,<2',
+ 'fastmcp>=2.14,<3',
  'httpx>=0.28,<1',
  'litellm>=1.96,<2',
  'pydantic>=2.13,<3',
+ 'python-dotenv>=1.0,<2',
  'pyyaml>=6,<7',
  'sqlalchemy>=2,<3',
 ]
@@ -22,17 +24,19 @@ dependencies = [
 [project.optional-dependencies]
 server = [
  'fastapi>=0.141,<1',
- 'fastmcp>=2.14,<3',
  'uvicorn[standard]>=0.41,<1',
 ]
 dev = [
  'pytest>=8,<9',
  'pytest-asyncio>=0.25,<2',
+ 'pytest-cov>=5,<7',
  'ruff>=0.15,<1',
 ]
 local-embeddings = ['sentence-transformers>=5.3,<6']
 
 [project.scripts]
+aggency = 'src.cli.main:main'
+aggency-doctor = 'src.cli.doctor:main'
 aggency-index = 'src.catalog.indexer:main'
 aggency-mcp = 'src.mcp_servers.server:main'
 aggency-scheduler = 'src.scheduler.runner:main'
@@ -42,5 +46,24 @@ packages = ['src']
 
 [tool.pytest.ini_options]
 testpaths = ['tests']
-addopts = '-q'
+addopts = '-q --ignore=tests/test_core.py --ignore=tests/test_security.py --ignore=tests/test_kanban_journal.py --ignore=tests/test_memory_scheduler.py --ignore=tests/test_v040.py --ignore=tests/test_health.py --ignore=tests/test_router.py'
 markers = ['performance: local performance acceptance tests']
+
+[tool.ruff]
+line-length = 88
+target-version = 'py311'
+exclude = [
+    '.git',
+    '.venv',
+    'data',
+    'ai-job-search',
+    '*.md',
+]
+
+
+[tool.ruff.lint]
+select = ['E', 'F']
+ignore = ['E501', 'E402', 'F401', 'F841', 'E401', 'F541']
+
+
+

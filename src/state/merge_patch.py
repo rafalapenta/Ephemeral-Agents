@@ -5,6 +5,7 @@ to apply partial mutations to task and orchestration state.
 
 Spec: https://datatracker.ietf.org/doc/html/rfc7396
 """
+
 from __future__ import annotations
 
 from typing import Any

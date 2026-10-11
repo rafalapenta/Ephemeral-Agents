@@ -3,6 +3,7 @@
 This module defines the health check MCP tools and can be run as a standalone
 MCP server via `python -m src.mcp_servers.health`.
 """
+
 from __future__ import annotations
 
 import sys
@@ -15,7 +16,11 @@ from fastmcp import FastMCP
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.health.health import check_agent_health, check_system_health, get_health_summary
+from src.health.health import (
+    check_agent_health,
+    check_system_health,
+    get_health_summary,
+)
 
 mcp = FastMCP("agency-health")
 
@@ -61,14 +66,16 @@ def list_agents_health() -> list[dict[str, Any]]:
     report = check_system_health()
     results = []
     for agent_id, agent_report in report.agent_reports.items():
-        results.append({
-            "agent_id": agent_id,
-            "name": agent_report.name,
-            "macro_domain": agent_report.macro_domain,
-            "status": agent_report.status,
-            "last_check": agent_report.last_check,
-            "errors": agent_report.errors,
-        })
+        results.append(
+            {
+                "agent_id": agent_id,
+                "name": agent_report.name,
+                "macro_domain": agent_report.macro_domain,
+                "status": agent_report.status,
+                "last_check": agent_report.last_check,
+                "errors": agent_report.errors,
+            }
+        )
     return results
 
 

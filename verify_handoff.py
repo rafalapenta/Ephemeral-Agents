@@ -6,7 +6,7 @@ from src.macro_agents.orchestrator import MacroOrchestrator
 # For hermes, the user will configure OPENAI_API_BASE to their local endpoint.
 os.environ["MODEL_PROVIDER"] = "openai"
 os.environ["MODEL_NAME"] = "gpt-4o-mini"
-os.environ["OPENAI_API_KEY"] = "sk-test-key-123" 
+os.environ["OPENAI_API_KEY"] = "sk-test-key-123"
 
 print("Testing Orchestrator with default litellm_handoff...")
 
@@ -17,14 +17,14 @@ try:
         chroma_path="./data/chroma_data",
         source_root="./src/bots_config",
     )
-    
-    # We won't actually call orchestrate() because without a valid API key, 
+
+    # We won't actually call orchestrate() because without a valid API key,
     # litellm will throw an AuthenticationError when trying to hit OpenAI.
     # But we can verify that the orchestrator initialized correctly with the new handoff_fn.
     print(f"Orchestrator initialized. Handoff function is: {orch.handoff_fn.__name__}")
     assert orch.handoff_fn.__name__ == "litellm_handoff"
-    
+
     print("SUCCESS: Handoff logic successfully wired!")
-    
+
 except Exception as e:
     print(f"ERROR: {e}")

@@ -9,7 +9,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-BASE_DIR = Path(r"C:\Users\RAFAEL\Desktop\Projetos Hermes\AGgency")
+BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_CATALOG = BASE_DIR / "src" / "catalog" / "indexer.py"
 SRC_ROUTER = BASE_DIR / "src" / "router" / "semantic.py"
 
@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 from src.database.models import Agent, AgentTool, Base
 from src.database.schemas import AgentCreate
 
-PROJECT_ROOT = Path(r"C:\\Users\\RAFAEL\\Desktop\\Projetos Hermes\\AGgency")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_URL = f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}"
 DEFAULT_CHROMA_PATH = PROJECT_ROOT / "chroma"
 _COLLECTION_NAME = "agency_agents"
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
-SEMANTIC_CODE = '''from __future__ import annotations
+SEMANTIC_CODE = """from __future__ import annotations
 
 import math
 import re
@@ -413,10 +413,10 @@ from sqlalchemy.orm import Session, sessionmaker, selectinload
 from src.catalog.indexer import HashEmbeddingFunction
 from src.database.models import Agent, AgentTool
 
-PROJECT_ROOT = Path(r"C:\\Users\\RAFAEL\\Desktop\\Projetos Hermes\\AGgency")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_URL = f"sqlite:///{PROJECT_ROOT / 'agency_agents.db'}"
 DEFAULT_CHROMA_PATH = PROJECT_ROOT / "chroma"
-DEFAULT_CATALOG_PATH = Path(r"C:\\Users\\RAFAEL\\Documents\\R!\\Obsidian Memory\\raw\\agency-agents")
+DEFAULT_CATALOG_PATH = Path(os.getenv("AGENCY_AGENTS_SOURCE", str(PROJECT_ROOT / "src" / "bots_config")))
 
 
 class CatalogEmptyError(RuntimeError):
@@ -616,7 +616,7 @@ def route_agent(
         )
     finally:
         session.close()
-'''
+"""
 
 SRC_CATALOG.parent.mkdir(parents=True, exist_ok=True)
 SRC_ROUTER.parent.mkdir(parents=True, exist_ok=True)

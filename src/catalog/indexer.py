@@ -22,6 +22,13 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, delete, text
 from sqlalchemy.orm import Session
 
+from src.catalog.embeddings import (
+    DeterministicHashEmbeddingFunction,
+    GatewayEmbeddingFunction,
+    LocalEmbeddingFunction,
+    get_embedding_function,
+    save_embedding_metadata,
+)
 from src.database.models import Agent, AgentTool, Base
 from src.database.schemas import AgentCreate
 
@@ -31,12 +38,29 @@ DEFAULT_CHROMA_PATH = PROJECT_ROOT / "chroma"
 _COLLECTION_NAME = "agency_agents"
 
 _EXCLUDED_DIRS = {
-    "examples", "strategy", "templates", "tests", ".git", "archive",
-    "docs", "scripts", "playbooks", "runbooks", "coordination"
+    "examples",
+    "strategy",
+    "templates",
+    "tests",
+    ".git",
+    "archive",
+    "docs",
+    "scripts",
+    "playbooks",
+    "runbooks",
+    "coordination",
 }
 _IGNORED_FILENAMES = {
-    "readme.md", "summary.md", "contributing.md", "license.md",
-    "changelog.md", "claude.md", "agents.md", "executive-brief.md", "quickstart.md", "nexus-strategy.md"
+    "readme.md",
+    "summary.md",
+    "contributing.md",
+    "license.md",
+    "changelog.md",
+    "claude.md",
+    "agents.md",
+    "executive-brief.md",
+    "quickstart.md",
+    "nexus-strategy.md",
 }
 _ROLE_PATTERN = re.compile(r"(?mi)^\s*-\s*\*\*Role\*\*:\s*(.+?)\s*$")
 _TOKEN_PATTERN = re.compile(r"(?u)\b[\w-]+\b")
@@ -59,33 +83,6 @@ class IndexingReport:
     invalid: int
     written: int
     errors: list[str] = field(default_factory=list)
-
-
-class GatewayEmbeddingFunction:
-    def __init__(self, dimensions: int = 1024) -> None:
-        self.dimensions = dimensions
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        import litellm
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        try:
-            api_key = os.environ.get("OMNIROUTE_API_KEY", "")
-            base_url = os.environ.get("OMNIROUTE_BASE_URL", "http://localhost:20128/v1").rstrip("/")
-            res = litellm.embedding(
-                model="openai/mistral-embed",
-                input=input,
-                api_base=base_url,
-                api_key=api_key
-            )
-            return [item["embedding"] for item in res.data]
-        except Exception as e:
-            import logging
-            logging.error(f"Embedding failed: {e}")
-            return [[0.0] * self.dimensions for _ in input]
-
-HashEmbeddingFunction = GatewayEmbeddingFunction
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -166,7 +163,9 @@ parse_markdown_agent = parse_agent_markdown
 def discover_agent_files(source_root: Path) -> Iterable[Path]:
     source_root = source_root.resolve()
     for path in sorted(source_root.rglob("*.md")):
-        if path.name.lower() in _IGNORED_FILENAMES or any(part.startswith(".") for part in path.parts):
+        if path.name.lower() in _IGNORED_FILENAMES or any(
+            part.startswith(".") for part in path.parts
+        ):
             continue
         if any(part.lower() in _EXCLUDED_DIRS for part in path.parts):
             continue
@@ -178,7 +177,8 @@ def discover_agent_files(source_root: Path) -> Iterable[Path]:
 def init_fts5_db(engine, session):
     Base.metadata.create_all(bind=engine)
     try:
-        session.execute(text("""
+        session.execute(
+            text("""
             CREATE VIRTUAL TABLE IF NOT EXISTS agents_fts USING fts5(
                 agent_id UNINDEXED,
                 name,
@@ -187,13 +187,16 @@ def init_fts5_db(engine, session):
                 trigger_hooks,
                 search_text
             );
-        """))
+        """)
+        )
         session.commit()
     except Exception:
         session.rollback()
 
 
-def _persist_relational(agents: list[AgentCreate], database_url: str, reindex: bool) -> None:
+def _persist_relational(
+    agents: list[AgentCreate], database_url: str, reindex: bool
+) -> None:
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
     with Session(engine) as session:
@@ -240,8 +243,8 @@ def _persist_relational(agents: list[AgentCreate], database_url: str, reindex: b
                         "macro_domain": item.macro_domain,
                         "squad": item.squad or "",
                         "trigger_hooks": " ".join(item.trigger_hooks),
-                        "search_text": search_text
-                    }
+                        "search_text": search_text,
+                    },
                 )
             except Exception:
                 pass
@@ -252,7 +255,7 @@ def _persist_vectors(
     agents: list[AgentCreate],
     chroma_path: Path,
     reindex: bool,
-    embedding_function: HashEmbeddingFunction,
+    embedding_function: Any,
 ) -> None:
     import chromadb
 
@@ -283,6 +286,7 @@ def _persist_vectors(
         ],
         embeddings=embedding_function(documents),
     )
+    save_embedding_metadata(chroma_path, embedding_function)
 
 
 def run_indexing(
@@ -293,7 +297,7 @@ def run_indexing(
     dry_run: bool = False,
     reindex: bool = False,
     allow_partial: bool = False,
-    embedding_function: HashEmbeddingFunction | None = None,
+    embedding_function: Any | None = None,
 ) -> IndexingReport:
     if not dry_run and not reindex:
         raise ValueError("persistent catalog changes require reindex=True")
@@ -327,7 +331,7 @@ def run_indexing(
                 errors=errors,
             )
 
-    embedder = embedding_function or HashEmbeddingFunction()
+    embedder = embedding_function or get_embedding_function()
     if not dry_run:
         _persist_relational(agents, database_url, reindex)
         _persist_vectors(agents, chroma_path_obj, reindex, embedder)
@@ -345,14 +349,46 @@ run_indexer = run_indexing
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate and index the agency-agents catalog")
-    parser.add_argument("source_root", nargs="?", type=Path, default=None, help="Path to the read-only agency-agents checkout")
-    parser.add_argument("--path", dest="path_flag", type=Path, default=None, help="Flag opcional para caminho do catálogo")
+    parser = argparse.ArgumentParser(
+        description="Validate and index the agency-agents catalog"
+    )
+    parser.add_argument(
+        "source_root",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Path to the read-only agency-agents checkout",
+    )
+    parser.add_argument(
+        "--path",
+        dest="path_flag",
+        type=Path,
+        default=None,
+        help="Flag opcional para caminho do catálogo",
+    )
     parser.add_argument("--database-url", default=DEFAULT_DB_URL)
     parser.add_argument("--chroma-path", type=Path, default=DEFAULT_CHROMA_PATH)
-    parser.add_argument("--dry-run", action="store_true", help="Validate without writing SQLite or ChromaDB")
-    parser.add_argument("--reindex", action="store_true", help="Explicitly rebuild the persisted catalog")
-    parser.add_argument("--allow-partial", action="store_true", help="Ignora erros individuais e prossegue")
+    parser.add_argument(
+        "--backend",
+        choices=["local", "gateway", "hash"],
+        default=None,
+        help="Embedding backend (default: AGENCY_EMBEDDINGS env or local)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate without writing SQLite or ChromaDB",
+    )
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Explicitly rebuild the persisted catalog",
+    )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Ignora erros individuais e prossegue",
+    )
     return parser
 
 
@@ -363,6 +399,10 @@ def main(argv: list[str] | None = None) -> int:
         print("❌ Erro: informe o caminho do catálogo (posicional ou via --path).")
         return 1
 
+    embedding_fn = (
+        get_embedding_function(backend=args.backend) if args.backend else None
+    )
+
     report = run_indexing(
         source_root=target_path,
         database_url=args.database_url,
@@ -370,8 +410,11 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         reindex=args.reindex,
         allow_partial=args.allow_partial,
+        embedding_function=embedding_fn,
     )
-    print(f"📦 Descobertos: {report.discovered} | Válidos: {report.valid} | Ignorados: {report.invalid}")
+    print(
+        f"📦 Descobertos: {report.discovered} | Válidos: {report.valid} | Ignorados: {report.invalid}"
+    )
     if report.errors:
         for err in report.errors:
             print(f"  ⚠️ {err}")
