@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
@@ -76,6 +76,8 @@ DEFAULT_DIRECTORS: dict[str, dict[str, Any]] = {
 class SkillFrontmatter(BaseModel):
     """Pydantic schema enforcing required frontmatter on SKILL.md files."""
 
+    model_config = ConfigDict(extra="allow")
+
     name: str = Field(..., min_length=1)
     description: str = Field(..., min_length=5)
     director: str = Field(..., min_length=1)
@@ -84,6 +86,7 @@ class SkillFrontmatter(BaseModel):
     status: Literal["active", "quarantined"] = "active"
     version: str = Field(default="1.0.0", min_length=1)
     token_budget: int = Field(default=800, ge=100)
+    notes: str | None = None
 
 
 def normalize_director_id(director: str) -> str:
@@ -181,6 +184,7 @@ def load_skills_from_dir(
     db_url: str | None = None,
     chroma_path: Path | str | None = None,
     embedder: Any = None,
+    engine: Any = None,
 ) -> dict[str, Any]:
     """Scan directory recursively for SKILL.md files, validate, persist in DB, and index in Chroma.
 
@@ -197,12 +201,13 @@ def load_skills_from_dir(
         skill_files = sorted(root_path.glob("*/SKILL.md"))
 
     # 2. Setup DB engine
-    resolved_db_url = db_url or os.getenv(
-        "DATABASE_URL", f"sqlite:///{Path.cwd() / 'agency_agents.db'}"
-    )
-    engine = create_engine(resolved_db_url)
-    with engine.connect() as conn:
-        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+    if engine is None:
+        resolved_db_url = db_url or os.getenv(
+            "DATABASE_URL", f"sqlite:///{Path.cwd() / 'agency_agents.db'}"
+        )
+        engine = create_engine(resolved_db_url)
+        with engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
     Base.metadata.create_all(engine)
     ensure_sqlite_schema(engine)
 
@@ -235,6 +240,7 @@ def load_skills_from_dir(
     # 3. Persist in database
     loaded_count = 0
     updated_count = 0
+    linked_count = 0
     with Session(engine) as session:
         ensure_directors_exist(session)
 
@@ -290,6 +296,7 @@ def load_skills_from_dir(
                     load_priority=1,
                 )
                 session.add(new_link)
+                linked_count += 1
 
         session.commit()
 
@@ -312,7 +319,6 @@ def load_skills_from_dir(
         collection = client.get_or_create_collection(
             name="skills_catalog",
             metadata={"hnsw:space": "cosine"},
-            embedding_function=embedding_fn,
         )
 
         ids = [item["id"] for item in parsed_skills]
@@ -341,7 +347,10 @@ def load_skills_from_dir(
                 metadatas=metadatas,
             )
             chroma_indexed = len(ids)
-            save_embedding_metadata(resolved_chroma_path, embedding_fn)
+            try:
+                save_embedding_metadata(resolved_chroma_path, embedding_fn)
+            except Exception as meta_exc:
+                print(f"Notice: embedding metadata save: {meta_exc}", file=sys.stderr)
     except Exception as exc:
         print(f"Warning: Chroma indexing failed ({exc})", file=sys.stderr)
 
@@ -349,6 +358,7 @@ def load_skills_from_dir(
         "total_discovered": len(skill_files),
         "new_skills": loaded_count,
         "updated_skills": updated_count,
+        "new_links": linked_count,
         "chroma_indexed": chroma_indexed,
         "skills": [s["id"] for s in parsed_skills],
     }

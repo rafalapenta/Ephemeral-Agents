@@ -626,20 +626,24 @@ def seed_skills_catalog(
         session.commit()
 
     skills_dir = PROJECT_ROOT / "skills"
+    skills_from_dir_count = 0
     if skills_dir.is_dir():
         try:
             loader_res = load_skills_from_dir(
                 skills_dir=skills_dir,
-                db_url=db_url or DEFAULT_DB_URL,
+                db_url=db_url,
+                engine=engine,
             )
-            seeded_skills_count += loader_res.get("new_skills", 0)
+            skills_from_dir_count = loader_res.get("new_skills", 0)
+            seeded_skills_count += skills_from_dir_count
+            seeded_links_count += loader_res.get("new_links", 0)
         except Exception as exc:
             print(f"Notice: skills/ loader: {exc}", file=sys.stderr)
 
     return {
         "skills_seeded": seeded_skills_count,
         "links_seeded": seeded_links_count,
-        "total_catalog_items": len(skills_to_seed),
+        "total_catalog_items": len(skills_to_seed) + skills_from_dir_count,
     }
 
 

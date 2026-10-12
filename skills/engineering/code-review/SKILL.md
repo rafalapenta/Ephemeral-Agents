@@ -7,6 +7,7 @@ license: MIT
 status: active
 version: "1.0.0"
 token_budget: 850
+notes: "modified from mattpocock/skills"
 ---
 
 # Code Review

@@ -7,6 +7,7 @@ license: MIT
 status: active
 version: "1.0.0"
 token_budget: 700
+notes: "modified from mattpocock/skills"
 ---
 
 # Grill-Me (Socratic Design Challenger)

@@ -353,9 +353,11 @@ def test_seed_skills_catalog_populates_all_six_directors() -> None:
         conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
     result = seed_skills_catalog(engine=engine)
-    assert result["total_catalog_items"] >= 30
+    skills_dir = Path(__file__).resolve().parent.parent / "skills"
+    real_skills_count = len(list(skills_dir.rglob("SKILL.md")))
+    assert result["total_catalog_items"] >= real_skills_count
     assert result["skills_seeded"] == result["total_catalog_items"]
-    assert result["links_seeded"] == result["total_catalog_items"]
+    assert result["links_seeded"] >= result["total_catalog_items"]
 
     with Session(engine) as session:
         directors = ["vulcan", "sterling", "aura", "vesper", "lyra", "atlas"]

@@ -42,9 +42,12 @@ class DeterministicHashEmbeddingFunction:
     """
 
     backend_name: str = "hash"
+    model_name: str = "blake2b-1024"
 
     def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
+        self.backend_name = "hash"
+        self.model_name = f"blake2b-{dimensions}"
 
     def name(self) -> str:
         return self.model_name

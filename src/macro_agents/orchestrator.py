@@ -258,7 +258,12 @@ class MacroOrchestrator:
     ) -> None:
         import os
 
-        self.state = StateManager(state_dir=state_dir)
+        resolved_state_dir = (
+            state_dir
+            if state_dir != "state_data"
+            else os.getenv("AGENCY_STATE_DIR", "state_data")
+        )
+        self.state = StateManager(state_dir=resolved_state_dir)
         self.dry_run = dry_run
         self.board = KanbanBoard(sync_linear=not dry_run)
         self.threshold = threshold
@@ -274,8 +279,9 @@ class MacroOrchestrator:
             self.handoff_fn = handoff_fn
 
         # Router config (passthrough to route_agent)
-        self._db_url = database_url
-        self._chroma = Path(chroma_path) if chroma_path else None
+        self._db_url = database_url or os.getenv("DATABASE_URL")
+        resolved_chroma = chroma_path or os.getenv("CHROMA_PERSIST_DIR")
+        self._chroma = Path(resolved_chroma) if resolved_chroma else None
         self._source = Path(source_root) if source_root else None
 
         # Check LLM gateway health on initialization (non-blocking warning if offline)

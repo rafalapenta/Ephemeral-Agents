@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,9 +11,37 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from scripts.seed_skills_catalog import seed_skills_catalog
 from src.cli.run import run_cli
-from src.database.models import SkillUsage
+from src.database.models import Base, SkillUsage
 from src.database.usage import ensure_tables
+
+
+@pytest.fixture(autouse=True)
+def isolated_cli_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Isolate CLI test execution in a fresh temporary SQLite DB and folders."""
+    db_path = tmp_path / "agency_cli_test.db"
+    db_url = f"sqlite:///{db_path}"
+    state_dir = tmp_path / "state_data"
+    chroma_dir = tmp_path / "chroma"
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    chroma_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("AGENCY_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("CHROMA_PERSIST_DIR", str(chroma_dir))
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+    Base.metadata.create_all(engine)
+    ensure_tables(engine)
+
+    seed_skills_catalog(engine=engine, db_url=db_url)
+
+    yield {"db_url": db_url, "engine": engine}
 
 
 def test_dry_run_end_to_end_creates_card_usage_and_run_file(
@@ -46,7 +75,8 @@ def test_dry_run_end_to_end_creates_card_usage_and_run_file(
 
     card_id = run_file.stem
     # Verify SkillUsage record exists in DB
-    engine = create_engine("sqlite:///./agency_agents.db")
+    db_url = os.getenv("DATABASE_URL", f"sqlite:///{tmp_path / 'agency_cli_test.db'}")
+    engine = create_engine(db_url)
     ensure_tables(engine)
     with Session(engine) as session:
         usage = session.scalars(
