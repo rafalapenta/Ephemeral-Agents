@@ -141,6 +141,27 @@ def _compute_adjusted_score(
     return max(0.0, min(1.0, float(score_final)))
 
 
+DEFAULT_SKILL_THRESHOLD = 0.72
+
+
+def get_skill_min_score() -> float:
+    """Retrieve skill minimum score threshold from environment.
+
+    Checks AGENCY_SKILL_MIN_SCORE first, then AGENCY_SKILL_THRESHOLD,
+    defaulting to DEFAULT_SKILL_THRESHOLD (0.72).
+    """
+    import os
+
+    val = os.getenv(
+        "AGENCY_SKILL_MIN_SCORE",
+        os.getenv("AGENCY_SKILL_THRESHOLD", str(DEFAULT_SKILL_THRESHOLD)),
+    )
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return DEFAULT_SKILL_THRESHOLD
+
+
 class DirectorSkillsEngine:
     """Scoped skills engine providing department isolation and adherence calculation."""
 
@@ -149,11 +170,11 @@ class DirectorSkillsEngine:
         db_session: Session,
         chroma_client: Any = None,
         embedder: Any = None,
-        threshold: float = 0.72,
+        threshold: float | None = None,
         collection_name: str = "skills_catalog",
     ) -> None:
         self.db_session = db_session
-        self.threshold = threshold
+        self.threshold = threshold if threshold is not None else get_skill_min_score()
         self.collection_name = collection_name
 
         if (
@@ -165,9 +186,19 @@ class DirectorSkillsEngine:
             self.chroma_client = None
         else:
             self.chroma_client = chroma_client
-            self.embedder = (
-                embedder if embedder is not None else DefaultSkillsEmbedder()
-            )
+            if embedder is not None:
+                self.embedder = embedder
+            else:
+                from src.catalog.embeddings import (
+                    get_embedding_function,
+                    resolve_embedding_backend,
+                )
+
+                backend = resolve_embedding_backend()
+                if backend in ("local", "gateway"):
+                    self.embedder = get_embedding_function()
+                else:
+                    self.embedder = DefaultSkillsEmbedder()
 
     def _get_or_create_collection(self) -> Any:
         if self.chroma_client is None:
@@ -181,11 +212,17 @@ class DirectorSkillsEngine:
             return None
 
     def get_authorized_skills(self, director_id: str) -> list[SkillCatalog]:
-        """Fetch strictly the skills linked to the given director in director_skills."""
+        """Fetch strictly the skills linked to the given director in director_skills.
+
+        Skills with status 'quarantined' are never resolved by the router.
+        """
         stmt = (
             select(SkillCatalog)
             .join(DirectorSkill, SkillCatalog.id == DirectorSkill.skill_id)
-            .where(DirectorSkill.director_id == director_id)
+            .where(
+                DirectorSkill.director_id == director_id,
+                SkillCatalog.status != "quarantined",
+            )
             .order_by(DirectorSkill.load_priority.asc(), SkillCatalog.id.asc())
         )
         return list(self.db_session.scalars(stmt).all())
@@ -217,10 +254,12 @@ class DirectorSkillsEngine:
         best_skill: SkillCatalog | None = None
 
         query_vec = self.embedder([prompt])[0]
-        docs = [f"{s.name}. {s.description}\n{s.content_md}" for s in authorized_skills]
+        docs = [f"{s.name}. {s.description}" for s in authorized_skills]
         doc_vecs = self.embedder(docs)
 
         for skill, doc_vec in zip(authorized_skills, doc_vecs, strict=False):
+            if getattr(skill, "status", "active") == "quarantined":
+                continue
             raw_sim = _cosine_similarity(query_vec, doc_vec)
             final_score = _compute_adjusted_score(
                 self.db_session, skill.id, director_id, raw_sim

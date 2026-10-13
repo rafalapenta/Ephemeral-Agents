@@ -110,6 +110,88 @@ The returned `OrchestrationResult` contains the matched agent, all gate verdicts
 
 ---
 
+## Rodando de ponta a ponta
+
+Execute tarefas reais de ponta a ponta usando apenas modelos grátis (via OmniRoute ou qualquer gateway OpenAI-compatible).
+
+### 1. Instalação
+
+```bash
+git clone <repo>
+cd Ephemeral-Agents-main
+python -m venv .venv
+source .venv/bin/activate  # ou .venv\Scripts\activate no Windows
+pip install -e ".[dev]"
+```
+
+### 2. Configurar o `.env` com provedor gratuito
+
+Copie `.env.example` para `.env` e configure seu gateway ou provedor gratuito (como OpenRouter ou OmniRoute):
+
+```bash
+cp .env.example .env
+```
+
+No `.env`:
+```env
+# Gateway OpenAI-compatible (ex: OmniRoute local ou OpenRouter)
+AGENCY_LLM_BASE_URL=https://openrouter.ai/api/v1
+AGENCY_LLM_API_KEY=sua-chave-aqui  # opcional se o gateway local não exigir chave
+
+# Modelos gratuitos padrão e fallback
+AGENCY_DEFAULT_MODEL=mistralai/mistral-7b-instruct:free
+AGENCY_FALLBACK_MODEL=meta-llama/llama-3.3-70b-instruct:free
+
+# Garantia de custo zero (bloqueia qualquer modelo pago)
+AGENCY_ALLOW_PAID=0
+
+# Backend de embeddings
+AGENCY_EMBEDDINGS=hash  # ou local
+DATABASE_URL=sqlite:///./agency_agents.db
+```
+
+### 3. Verificar o ambiente (`aggency doctor`)
+
+Antes de rodar tarefas, certifique-se de que o gateway e as dependências estão operacionais:
+
+```bash
+aggency doctor
+```
+
+O doctor valida a conectividade HTTP com o gateway LLM, verifica o catálogo SQLite e o estado do ChromaDB. Se houver alguma pendência, o comando indica instruções claras de resolução sem stack traces.
+
+### 4. Executar tarefas (`aggency run`)
+
+Execute tarefas em linguagem natural através do comando único `aggency run`:
+
+```bash
+# Execução padrão (roteamento automático de diretor e skill)
+aggency run "Liste 3 riscos técnicos de um bot de WhatsApp para imobiliária"
+
+# Direcionando para um diretor específico (cto, cmo, cfo, etc.)
+aggency run "3 ganchos de post para lançar um serviço de agentes para PMEs" --director cmo
+
+# Estimativa financeira
+aggency run "Estimativa de custo mensal para 1000 tarefas com modelos grátis" --director cfo
+
+# Modo offline determinístico (ideal para CI e smoke tests, sem chamadas de LLM)
+aggency run "Validar pipeline de CI" --dry-run
+
+# Saída estruturada em JSON
+aggency run "Auditoria de arquitetura" --dry-run --json
+```
+
+O fluxo completo:
+1. **Pré-checagem**: valida conectividade e conformidade de custo gratuito (`--max-cost`);
+2. **Kanban**: cria o card da tarefa no Kanban;
+3. **Roteamento**: seleciona o diretor e skill autorizada via `SemanticRouter` e `DirectorSkillsEngine`;
+4. **Contexto & Handoff**: comprime o contexto e despacha para o diretor com a tool `spawn_ephemeral`;
+5. **Efêmeros & Gates**: executa subagentes efêmeros e avalia os Quality Gates;
+6. **Telemetria**: registra métricas em `SkillUsage` e conclui o card;
+7. **Persistência**: salva o resultado com frontmatter em `state_data/runs/<card_id>.md`.
+
+---
+
 ## Key modules
 
 ### `src/catalog/indexer.py` and `src/catalog/embeddings.py`

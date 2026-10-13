@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 import litellm
 
+from src.database.models import DEFAULT_DB_URL
 from src.database.usage import record_skill_usage
 from src.gateway.models import estimate_cost, resolve_model
 from src.governance.limits import EphemeralLimits, record_task_cost
@@ -86,7 +88,11 @@ def litellm_handoff(
 
     # Extract helper services strictly from runtime or kwargs, never from context
     active_board = (runtime.board if runtime else None) or board
-    db_url = (runtime.db_url if runtime else None) or database_url
+    db_url = (
+        (runtime.db_url if runtime else None)
+        or database_url
+        or os.getenv("DATABASE_URL", DEFAULT_DB_URL)
+    )
     active_limits = (runtime.limits if runtime else None) or limits or EphemeralLimits()
     active_state = (runtime.state_manager if runtime else None) or state_manager
     adherence = (runtime.adherence_score if runtime else None) or (
@@ -218,35 +224,136 @@ def litellm_handoff(
                     "timestamp": time.time(),
                 }
 
-            # Call LLM with fallback candidates
+            # Call LLM with fallback candidates and retry on 429 / rate limits
             candidates = [resolved.model, *resolved.fallbacks]
             response = None
 
+            def _is_rate_limit(err: Exception) -> bool:
+                err_str = str(err).lower()
+                return (
+                    isinstance(
+                        err,
+                        (
+                            getattr(litellm, "RateLimitError", type(None)),
+                            getattr(
+                                getattr(litellm, "exceptions", None),
+                                "RateLimitError",
+                                type(None),
+                            ),
+                        ),
+                    )
+                    or "429" in err_str
+                    or "rate limit" in err_str
+                    or "rate_limit" in err_str
+                )
+
             for index, candidate in enumerate(candidates):
-                try:
-                    response = litellm.completion(
-                        model=candidate,
-                        messages=messages,
-                        **completion_kwargs,
-                    )
-                    used_model = candidate
-                    if index > 0:
-                        logger.warning(
-                            "Primary model unavailable; served by fallback %s",
-                            candidate,
+                # 1 retry with backoff on 429 / rate limit
+                for attempt in range(2):
+                    try:
+                        response = litellm.completion(
+                            model=candidate,
+                            messages=messages,
+                            **completion_kwargs,
                         )
+                        used_model = candidate
+                        if index > 0:
+                            logger.warning(
+                                "Primary model unavailable; served by fallback %s",
+                                candidate,
+                            )
+                        break
+                    except Exception as attempt_error:  # noqa: BLE001
+                        last_error = attempt_error
+                        if _is_rate_limit(attempt_error) and attempt == 0:
+                            backoff = float(
+                                os.getenv("AGENCY_RETRY_BACKOFF_SECONDS", "1.0")
+                            )
+                            logger.warning(
+                                "Rate limit (429) on %s; retrying with backoff (%.1fs)...",
+                                candidate,
+                                backoff,
+                            )
+                            time.sleep(backoff)
+                            continue
+                        logger.warning(
+                            "Model %s failed (%s: %s)%s",
+                            candidate,
+                            type(attempt_error).__name__,
+                            attempt_error,
+                            "; trying next fallback"
+                            if index + 1 < len(candidates)
+                            else "",
+                        )
+                        break
+                if response is not None:
                     break
-                except Exception as attempt_error:  # noqa: BLE001
-                    last_error = attempt_error
-                    logger.warning(
-                        "Model %s failed (%s: %s)%s",
-                        candidate,
-                        type(attempt_error).__name__,
-                        attempt_error,
-                        "; trying next fallback" if index + 1 < len(candidates) else "",
-                    )
 
             if response is None:
+                if last_error and _is_rate_limit(last_error):
+                    escalation_msg = f"Rate limit / 429 persistiu após retry e fallbacks: {last_error}"
+                    logger.error("Escalating task %s: %s", task.task_id, escalation_msg)
+                    if active_board is not None:
+                        try:
+                            active_board.transition(
+                                task.task_id,
+                                KanbanStatus.ESCALATED,
+                                actor="gateway",
+                                reason=escalation_msg[:200],
+                            )
+                        except Exception:
+                            try:
+                                active_board.transition(
+                                    task.task_id,
+                                    KanbanStatus.BLOCKED,
+                                    actor="gateway",
+                                    reason=escalation_msg[:200],
+                                )
+                            except Exception:
+                                pass
+                        task.blocked_reason = escalation_msg
+
+                    duration = time.time() - start_time
+                    cost_rep = active_limits.to_report()
+                    record_task_cost(task.task_id, cost_rep)
+
+                    skill_id = (
+                        context.get("ephemeral_skill", {}).get("id")
+                        if context and isinstance(context.get("ephemeral_skill"), dict)
+                        else None
+                    )
+                    _safe_record_skill_usage(
+                        director_id=route.agent_id,
+                        task_id=task.task_id,
+                        skill_id=skill_id,
+                        is_ephemeral=False,
+                        adherence_score=adherence,
+                        outcome="ESCALATED",
+                        gates_passed=False,
+                        gates_failed=["RATE_LIMIT_429"],
+                        model=used_model,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                        cost_usd=total_cost_usd,
+                        cost_source=active_limits.cost_source,
+                        duration_ms=duration * 1000.0,
+                        note=f"Task escalated due to 429 rate limit: {last_error}"[
+                            :280
+                        ],
+                        state_manager=active_state,
+                        database_url=db_url,
+                    )
+                    return {
+                        "status": "escalated",
+                        "agent_id": route.agent_id,
+                        "model": used_model,
+                        "error": escalation_msg,
+                        "reply": f"Task escalated: {escalation_msg}",
+                        "cost_report": cost_rep,
+                        "duration_seconds": round(duration, 2),
+                        "timestamp": time.time(),
+                    }
+
                 raise last_error or RuntimeError("No model candidates available")
 
             # Accumulate usage & cost
@@ -424,3 +531,147 @@ def litellm_handoff(
             "cost_report": cost_report,
             "timestamp": time.time(),
         }
+
+
+def dry_run_handoff(
+    task: KanbanTask,
+    route: RouteAgentResult,
+    context: dict[str, Any] | None = None,
+    runtime: HandoffRuntime | None = None,
+    *,
+    board: KanbanBoard | None = None,
+    database_url: str | None = None,
+    limits: EphemeralLimits | None = None,
+    state_manager: StateManager | None = None,
+    tools_enabled: bool = True,
+) -> dict[str, Any]:
+    """Execute a deterministic dry-run handoff that completes all stages without LLM calls.
+
+    Creates subtasks, simulates ephemeral tool executions, registers SkillUsage,
+    and returns a clean, structured reply with zero cost.
+    """
+    start_time = time.time()
+    active_board = (runtime.board if runtime else None) or board
+    db_url = (
+        (runtime.db_url if runtime else None)
+        or database_url
+        or os.getenv("DATABASE_URL", DEFAULT_DB_URL)
+    )
+    active_limits = (runtime.limits if runtime else None) or limits or EphemeralLimits()
+    active_state = (runtime.state_manager if runtime else None) or state_manager
+    adherence = (runtime.adherence_score if runtime else None) or (
+        context.get("adherence_score") if context else 1.0
+    )
+
+    skill_id = (
+        context.get("ephemeral_skill", {}).get("id")
+        if context and isinstance(context.get("ephemeral_skill"), dict)
+        else (
+            getattr(route.skill_match, "candidate_id", None)
+            if hasattr(route, "skill_match")
+            else None
+        )
+    )
+
+    tool_calls_executed = 0
+    if skill_id:
+        tool_calls_executed = 1
+        subtask = KanbanTask(
+            title=f"Subtarefa efêmera: {skill_id}",
+            body=f"Execução simulada da skill '{skill_id}' para a tarefa '{task.title}'",
+            priority=task.priority,
+            assignee="ephemeral",
+            macro_domain=route.macro_domain,
+            parent_task_id=task.task_id,
+        )
+        if active_board is not None:
+            active_board.add(subtask)
+            if subtask.status == KanbanStatus.TODO:
+                active_board.transition(
+                    subtask.task_id, KanbanStatus.READY, actor="director"
+                )
+            if subtask.status == KanbanStatus.READY:
+                active_board.transition(
+                    subtask.task_id, KanbanStatus.IN_PROGRESS, actor="director"
+                )
+            active_board.transition(
+                subtask.task_id,
+                KanbanStatus.DONE,
+                actor="ephemeral",
+                reason="dry-run complete",
+            )
+
+        active_limits.record_call(
+            tokens=100, cost_usd=0.0, is_ephemeral=True, cost_source="free_tier"
+        )
+
+        _safe_record_skill_usage(
+            director_id=route.agent_id,
+            task_id=subtask.task_id,
+            parent_task_id=task.task_id,
+            skill_id=skill_id,
+            is_ephemeral=True,
+            adherence_score=adherence,
+            outcome="SUCCESS",
+            gates_passed=True,
+            gates_failed=[],
+            model="simulated/dry-run",
+            prompt_tokens=50,
+            completion_tokens=50,
+            cost_usd=0.0,
+            cost_source="free_tier",
+            duration_ms=10.0,
+            note=f"Dry-run ephemeral execution of {skill_id}",
+            state_manager=active_state,
+            database_url=db_url,
+        )
+
+    active_limits.record_call(
+        tokens=150, cost_usd=0.0, is_ephemeral=False, cost_source="free_tier"
+    )
+
+    reply = (
+        f"[DRY-RUN] Tarefa '{task.title}' processada com sucesso pelo diretor {route.agent_id}.\n"
+        f"Skill utilizada: {skill_id or 'none'}.\n"
+        f"Subagentes efêmeros executados: {tool_calls_executed}."
+    )
+
+    duration = time.time() - start_time
+    cost_report = active_limits.to_report()
+    record_task_cost(task.task_id, cost_report)
+
+    _safe_record_skill_usage(
+        director_id=route.agent_id,
+        task_id=task.task_id,
+        skill_id=skill_id,
+        is_ephemeral=False,
+        adherence_score=adherence,
+        outcome="SUCCESS",
+        gates_passed=True,
+        gates_failed=[],
+        model="simulated/dry-run",
+        prompt_tokens=75,
+        completion_tokens=75,
+        cost_usd=0.0,
+        cost_source="free_tier",
+        duration_ms=duration * 1000.0,
+        note="Dry-run director execution completed",
+        state_manager=active_state,
+        database_url=db_url,
+    )
+
+    return {
+        "status": "success",
+        "agent_id": route.agent_id,
+        "model": "simulated/dry-run",
+        "reply": reply,
+        "usage": {
+            "prompt_tokens": 125,
+            "completion_tokens": 125,
+            "total_tokens": 250,
+        },
+        "cost_report": cost_report,
+        "tool_calls_executed": tool_calls_executed,
+        "duration_seconds": round(duration, 3),
+        "timestamp": time.time(),
+    }

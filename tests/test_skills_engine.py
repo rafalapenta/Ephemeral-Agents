@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import chromadb
 import pytest
 from sqlalchemy import create_engine
@@ -207,6 +209,10 @@ def test_empty_prompt_and_unknown_director(db_session: Session) -> None:
     assert "No authorized skills found" in unknown_res.reason
 
 
+@pytest.mark.skipif(
+    os.getenv("AGENCY_EMBEDDINGS") == "hash",
+    reason="Hash embedding yields ~0.646 lexical similarity below 0.72 threshold; requires semantic embeddings",
+)
 def test_chromadb_client_integration(db_session: Session) -> None:
     """Test DirectorSkillsEngine operating with an in-memory ChromaDB client."""
     chroma_client = chromadb.EphemeralClient()
@@ -224,3 +230,65 @@ def test_chromadb_client_integration(db_session: Session) -> None:
     assert result.score >= 0.72
     assert result.skill is not None
     assert result.skill.id == "pytest-runner"
+
+
+def test_skill_min_score_configurable_via_agency_skill_min_score(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AGENCY_SKILL_MIN_SCORE configures the default threshold."""
+    from src.catalog.skills_engine import get_skill_min_score
+
+    monkeypatch.setenv("AGENCY_SKILL_MIN_SCORE", "0.85")
+    assert get_skill_min_score() == 0.85
+
+    engine = DirectorSkillsEngine(db_session=db_session)
+    assert engine.threshold == 0.85
+
+
+def test_marketing_task_cannot_resolve_to_agentmail_nor_pytest_runner(
+    db_session: Session,
+) -> None:
+    """Marketing task must not resolve to agentmail or pytest-runner when below threshold."""
+    vesper = Agent(
+        agent_id="vesper",
+        macro_domain="business",
+        name="Vesper",
+        system_prompt_path="src/bots_config/vesper/SOUL.md",
+        trigger_hooks=["marketing", "social", "growth"],
+        is_active=True,
+    )
+    agentmail_skill = SkillCatalog(
+        id="agentmail",
+        name="AgentMail Dispatcher",
+        description="Envio transacional de emails e confirmação de entrega.",
+        content_md="# AgentMail\nDisparo de e-mails via SMTP/API.",
+        token_budget=400,
+    )
+    db_session.add_all([vesper, agentmail_skill])
+    db_session.flush()
+    db_session.add(
+        DirectorSkill(
+            director_id="vesper",
+            skill_id="agentmail",
+            is_core=True,
+            load_priority=1,
+        )
+    )
+    db_session.commit()
+
+    engine = DirectorSkillsEngine(db_session=db_session, threshold=0.72)
+    marketing_prompt = "3 ganchos de post para lançar um serviço de agentes para PMEs"
+
+    # Querying Vesper
+    vesper_res = engine.resolve_skill("vesper", marketing_prompt)
+    assert vesper_res.matched is False
+    assert vesper_res.skill is None
+    assert getattr(vesper_res.skill, "id", None) != "agentmail"
+    assert getattr(vesper_res.skill, "id", None) != "pytest-runner"
+
+    # Querying Vulcan
+    vulcan_res = engine.resolve_skill("vulcan", marketing_prompt)
+    assert vulcan_res.matched is False
+    assert vulcan_res.skill is None
+    assert getattr(vulcan_res.skill, "id", None) != "pytest-runner"
+    assert getattr(vulcan_res.skill, "id", None) != "agentmail"

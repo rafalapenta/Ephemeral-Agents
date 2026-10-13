@@ -146,6 +146,13 @@ class SkillCatalog(Base):
     source: Mapped[str] = mapped_column(
         String, nullable=False, default="local", server_default="local"
     )
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="active", server_default="active"
+    )
+    license: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    version: Mapped[str | None] = mapped_column(
+        String, nullable=True, default="1.0.0", server_default="1.0.0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

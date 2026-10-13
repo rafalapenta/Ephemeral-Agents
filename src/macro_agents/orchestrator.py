@@ -25,8 +25,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from src.catalog.skills_engine import DirectorSkillsEngine, SkillMatchResult
-from src.database.models import Base, DirectorSkill, SkillCatalog
-from src.macro_agents.handoff import HandoffFn, litellm_handoff
+from src.database.models import Agent, Base, DirectorSkill, SkillCatalog
+from src.macro_agents.handoff import HandoffFn, dry_run_handoff, litellm_handoff
 from src.orchestration.context import compress_context, inject_ephemeral_skill
 from src.orchestration.kanban import (
     MISSING_SKILL,
@@ -66,6 +66,7 @@ class OrchestrationResult:
     gates: list[GateResult] = field(default_factory=list)
     state_version: int = 0
     error: str | None = None
+    handoff_result: dict[str, Any] | None = None
 
     @property
     def all_gates_passed(self) -> bool:
@@ -77,10 +78,8 @@ class OrchestrationResult:
 
     @property
     def resolved_skill_id(self) -> str | None:
-        if self.skill_match and self.skill_match.skill:
+        if self.skill_match and self.skill_match.matched and self.skill_match.skill:
             return self.skill_match.skill.id
-        if self.skill_match:
-            return self.skill_match.candidate_id
         return None
 
     @property
@@ -134,6 +133,7 @@ class OrchestrationResult:
             "state_version": self.state_version,
             "all_gates_passed": self.all_gates_passed,
             "error": self.error,
+            "handoff_result": self.handoff_result,
         }
 
 
@@ -251,18 +251,37 @@ class MacroOrchestrator:
         chroma_path: Path | str | None = None,
         source_root: Path | str | None = None,
         threshold: float = 0.30,
+        skill_threshold: float | None = None,
+        fallback_to_candidate: bool = False,
         handoff_fn: HandoffFn | None = litellm_handoff,
         dry_run: bool = False,
     ) -> None:
-        self.state = StateManager(state_dir=state_dir)
+        import os
+
+        resolved_state_dir = (
+            state_dir
+            if state_dir != "state_data"
+            else os.getenv("AGENCY_STATE_DIR", "state_data")
+        )
+        self.state = StateManager(state_dir=resolved_state_dir)
         self.dry_run = dry_run
         self.board = KanbanBoard(sync_linear=not dry_run)
         self.threshold = threshold
-        self.handoff_fn = None if dry_run else handoff_fn
+        from src.catalog.skills_engine import get_skill_min_score
+
+        self.skill_threshold = (
+            skill_threshold if skill_threshold is not None else get_skill_min_score()
+        )
+        self.fallback_to_candidate = fallback_to_candidate
+        if dry_run and handoff_fn is litellm_handoff:
+            self.handoff_fn = dry_run_handoff
+        else:
+            self.handoff_fn = handoff_fn
 
         # Router config (passthrough to route_agent)
-        self._db_url = database_url
-        self._chroma = Path(chroma_path) if chroma_path else None
+        self._db_url = database_url or os.getenv("DATABASE_URL")
+        resolved_chroma = chroma_path or os.getenv("CHROMA_PERSIST_DIR")
+        self._chroma = Path(resolved_chroma) if resolved_chroma else None
         self._source = Path(source_root) if source_root else None
 
         # Check LLM gateway health on initialization (non-blocking warning if offline)
@@ -300,13 +319,149 @@ class MacroOrchestrator:
             )
 
             # Route
-            route_result = route_agent(
-                query=query,
-                threshold=self.threshold,
-                database_url=self._db_url,
-                chroma_path=self._chroma,
-                source_root=self._source,
-            )
+            route_result = None
+            if task.assignee and task.assignee.lower() not in ("", "auto"):
+                db_url = self._db_url or DEFAULT_DB_URL
+                engine = create_engine(db_url)
+                with Session(engine) as s:
+                    ag = s.scalar(
+                        select(Agent).where(Agent.agent_id == task.assignee.lower())
+                    )
+                    if ag is not None:
+                        s_root = (
+                            Path(self._source)
+                            if self._source
+                            else Path("src/bots_config")
+                        )
+                        prompt_path = s_root / ag.system_prompt_path
+                        prompt_text = (
+                            prompt_path.read_text(encoding="utf-8")
+                            if prompt_path.exists()
+                            else ""
+                        )
+                        route_result = RouteAgentResult(
+                            matched=True,
+                            score=1.0,
+                            agent_id=ag.agent_id,
+                            name=ag.name,
+                            macro_domain=ag.macro_domain,
+                            system_prompt=prompt_text,
+                            reason=f"explicit director assignment: {ag.agent_id}",
+                        )
+
+            if route_result is None:
+                route_result = route_agent(
+                    query=query,
+                    threshold=self.threshold,
+                    database_url=self._db_url,
+                    chroma_path=self._chroma,
+                    source_root=self._source,
+                )
+
+            if not route_result.matched:
+                q_lower = (query or "").lower()
+                keyword_director = None
+                if any(
+                    w in q_lower
+                    for w in (
+                        "técnico",
+                        "whatsapp",
+                        "bot",
+                        "código",
+                        "software",
+                        "arquitetura",
+                        "devops",
+                        "segurança",
+                        "infra",
+                        "api",
+                        "bugs",
+                    )
+                ):
+                    keyword_director = "vulcan"
+                elif any(
+                    w in q_lower
+                    for w in (
+                        "marketing",
+                        "post",
+                        "gancho",
+                        "ganchos",
+                        "social",
+                        "growth",
+                        "copy",
+                        "lançamento",
+                        "pme",
+                        "campanha",
+                    )
+                ):
+                    keyword_director = "vesper"
+                elif any(
+                    w in q_lower
+                    for w in (
+                        "custo",
+                        "preço",
+                        "financeiro",
+                        "orçamento",
+                        "fp&a",
+                        "pricing",
+                        "mensal",
+                        "tarefas",
+                        "economia",
+                        "tokens",
+                    )
+                ):
+                    keyword_director = "sterling"
+                elif any(
+                    w in q_lower
+                    for w in ("pesquisa", "análise", "estudo", "artigo", "evidência")
+                ):
+                    keyword_director = "lyra"
+                elif any(
+                    w in q_lower
+                    for w in ("produto", "design", "ux", "interface", "telas")
+                ):
+                    keyword_director = "aura"
+                elif any(
+                    w in q_lower
+                    for w in (
+                        "estratégia",
+                        "coordenação",
+                        "planejamento",
+                        "governança",
+                    )
+                ):
+                    keyword_director = "atlas"
+                elif self.fallback_to_candidate:
+                    keyword_director = "vulcan"
+
+                if keyword_director:
+                    db_url = self._db_url or DEFAULT_DB_URL
+                    engine = create_engine(db_url)
+                    with Session(engine) as s:
+                        ag = s.scalar(
+                            select(Agent).where(Agent.agent_id == keyword_director)
+                        )
+                        if ag is not None:
+                            s_root = (
+                                Path(self._source)
+                                if self._source
+                                else Path("src/bots_config")
+                            )
+                            prompt_path = s_root / ag.system_prompt_path
+                            prompt_text = (
+                                prompt_path.read_text(encoding="utf-8")
+                                if prompt_path.exists()
+                                else ""
+                            )
+                            route_result = RouteAgentResult(
+                                matched=True,
+                                score=0.85,
+                                agent_id=ag.agent_id,
+                                name=ag.name,
+                                macro_domain=ag.macro_domain,
+                                system_prompt=prompt_text,
+                                reason=f"keyword domain match: {ag.agent_id}",
+                            )
+
             result.route = route_result
 
             result.gates.append(
@@ -350,7 +505,7 @@ class MacroOrchestrator:
             with Session(engine) as session:
                 skills_engine = DirectorSkillsEngine(
                     db_session=session,
-                    threshold=0.72,
+                    threshold=self.skill_threshold,
                 )
                 skill_match = skills_engine.resolve_skill(director_id, task_description)
             result.skill_match = skill_match
@@ -441,7 +596,7 @@ class MacroOrchestrator:
             limits = EphemeralLimits()
             runtime = HandoffRuntime(
                 state_manager=self.state,
-                db_url=self._db_url,
+                db_url=self._db_url or DEFAULT_DB_URL,
                 limits=limits,
                 adherence_score=skill_match.score if skill_match else 1.0,
                 board=self.board,
@@ -491,6 +646,44 @@ class MacroOrchestrator:
                     )
                 )
                 return result
+
+            if handoff_result.get("status") == "escalated":
+                if task.status != KanbanStatus.ESCALATED:
+                    try:
+                        self.board.transition(
+                            task.task_id,
+                            KanbanStatus.ESCALATED,
+                            actor="gateway",
+                            reason=handoff_result.get("error", "Rate limit escalation"),
+                        )
+                    except Exception:
+                        pass
+                task.blocked_reason = handoff_result.get(
+                    "error", "Rate limit escalation"
+                )
+                self.state.apply(
+                    {
+                        "phase": "escalated",
+                        "blocked_reason": task.blocked_reason,
+                        "handoff_result": handoff_result,
+                        "target_agent": route_result.agent_id,
+                    },
+                    source="gateway",
+                )
+                result.status = "escalated"
+                result.error = handoff_result.get("error", "Task escalated")
+                result.handoff_result = handoff_result
+                result.state_version = self.state.version
+                result.gates.append(
+                    GateResult(
+                        gate_id="GATE4",
+                        passed=False,
+                        message=result.error,
+                    )
+                )
+                return result
+
+            result.handoff_result = handoff_result
 
             self.state.apply(
                 {

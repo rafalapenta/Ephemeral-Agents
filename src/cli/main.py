@@ -16,11 +16,16 @@ def main() -> None:
         )
         print("  index       Discover and index agent catalog")
         print("  mcp         Start MCP server")
+        print("  run         Execute a task end-to-end with free-tier models")
         print("  scheduler   Run autonomous scheduler")
         sys.exit(0)
 
     cmd = args[0].lower()
-    if cmd == "doctor":
+    if cmd == "run":
+        from src.cli.run import run_cli
+
+        sys.exit(run_cli(args[1:]))
+    elif cmd == "doctor":
         from src.cli.doctor import run_doctor
 
         sys.exit(run_doctor())

@@ -211,8 +211,16 @@ def route_agent(
     # 3. Hybrid Scoring Fusion
     candidates = set(vector_scores.keys()) | set(fts_scores.keys())
     if not candidates:
-        session.close()
-        raise CatalogEmptyError("agency_agents collection or database is empty")
+        all_agent_ids = [
+            r[0]
+            for r in session.execute(
+                select(Agent.agent_id).where(Agent.is_active.is_(True))
+            ).fetchall()
+        ]
+        if not all_agent_ids:
+            session.close()
+            raise CatalogEmptyError("agency_agents collection or database is empty")
+        candidates = set(all_agent_ids)
 
     # Resolve macro_domain for each candidate (for tie-breaking)
     domain_map: dict[str, str] = {}
@@ -272,10 +280,12 @@ def route_agent(
         # Resolve director skill if applicable
         skill_match_dict: dict[str, Any] | None = None
         try:
+            from src.catalog.skills_engine import get_skill_min_score
+
             skills_engine = DirectorSkillsEngine(
                 db_session=session,
                 embedder=embedding_function,
-                threshold=0.72,
+                threshold=get_skill_min_score(),
             )
             match_res = skills_engine.resolve_skill(agent.agent_id, query)
             skill_match_dict = {
@@ -307,13 +317,17 @@ def route_agent(
 def resolve_director_skill(
     director_id: str,
     task_prompt: str,
-    threshold: float = 0.72,
+    threshold: float | None = None,
     *,
     database_url: str | None = None,
     chroma_path: Path | str | None = None,
     embedding_function: Any = None,
 ) -> SkillMatchResult:
     """Resolve authorized skill for a director with department isolation and thresholding."""
+    if threshold is None:
+        from src.catalog.skills_engine import get_skill_min_score
+
+        threshold = get_skill_min_score()
     db_url = database_url or DEFAULT_DB_URL
     engine = create_engine(db_url)
     c_path = Path(chroma_path) if chroma_path else DEFAULT_CHROMA_PATH
