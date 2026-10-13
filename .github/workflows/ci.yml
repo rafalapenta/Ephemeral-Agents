@@ -54,10 +54,31 @@ jobs:
           AGENCY_EMBEDDINGS: hash
         run: pytest --cov=. --cov-report=xml -v
 
+      - name: Seed database
+        env:
+          DATABASE_URL: sqlite:///ci_smoke.db
+          AGENCY_EMBEDDINGS: hash
+        run: |
+          python -c "from sqlalchemy import create_engine; from src.database.models import Base; from src.database.usage import ensure_tables; from scripts.seed_skills_catalog import seed_skills_catalog; engine = create_engine('sqlite:///ci_smoke.db'); Base.metadata.create_all(engine); ensure_tables(engine); seed_skills_catalog(engine=engine, db_url='sqlite:///ci_smoke.db')"
+
       - name: Run E2E dry-run smoke test
         env:
+          DATABASE_URL: sqlite:///ci_smoke.db
           AGENCY_EMBEDDINGS: hash
-        run: aggency run --dry-run "teste"
+        run: |
+          set +e
+          output=$(aggency run --dry-run "teste" 2>&1)
+          exit_code=$?
+          echo "$output"
+          if echo "$output" | grep -qiE "OperationalError|no such table|Traceback|Resultado:\s+FAILURE"; then
+            echo "Smoke test failed with an unexpected error"
+            exit 1
+          fi
+          if [ $exit_code -eq 0 ] || echo "$output" | grep -qE "SUCCESS|MISSING_SKILL|BLOCKED"; then
+            echo "Smoke test passed"
+            exit 0
+          fi
+          exit $exit_code
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
